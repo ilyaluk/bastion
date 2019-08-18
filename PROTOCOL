@@ -1,0 +1,60 @@
+Supported messages
+channel types:
+    +session
+    ☐direct-tcpip
+    +auth-agent@openssh.com (from us)
+channel requests:
+    +pty-req
+    +env
+    +auth-agent-req@openssh.com
+
+    +shell
+    +exec
+    ☐subsystem
+
+    +window-change
+    +signal
+    +eow@openssh.com
+
+    server:
+        +exit-status
+        +exit-signal
+
+global requests:
+    +keepalive@openssh.com
+    ☐keepalive from us
+    +no-more-sessions@openssh.com
+
+client/server certs
+
+
+no support:
+channel types:
+    x11
+    direct-streamlocal@openssh.com
+    tun@openssh.com
+    server-side:
+        forwarded-tcpip
+        forwarded-streamlocal@openssh.com
+channel requests:
+    x11-req
+    xon-xoff
+global requests:
+    tcpip-forward
+    cancel-tcpip-forward
+    streamlocal-forward@openssh.com
+    cancel-streamlocal-forward@openssh.com
+
+???:
+hostkeys-00@openssh.com
+hostkeys-prove-00@openssh.com
+hostkeys-prove@openssh.com
+hostkeys@openssh.com
+
+sftp:
+fstatvfs@openssh.com
+fsync@openssh.com
+hardlink@openssh.com
+statvfs@openssh.com
+posix-rename@openssh.com
+lsetstat@openssh.com
