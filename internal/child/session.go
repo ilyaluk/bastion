@@ -36,6 +36,7 @@ type Session struct {
 
 	client  *client.Client
 	session *client.Session
+	log     *logger.SessionLogger
 }
 
 const (
@@ -43,20 +44,23 @@ const (
 	NocauthHost = "NOCAUTH_HOST"
 )
 
-func NewSession(ch ssh.NewChannel, sc *sessionConfig) (*Session, error) {
+func HandleSession(ch ssh.NewChannel, sc *sessionConfig) {
 	channel, reqs, err := ch.Accept()
 	if err != nil {
-		return nil, err
+		sc.errs <- err
+		return
 	}
 	sc.Info("accepted session channel")
 
-	return &Session{
+	s := Session{
 		sessionConfig: sc,
 		Channel:       channel,
 		reqs:          reqs,
 
 		env: make(map[string]string),
-	}, nil
+	}
+
+	s.handleReqs(s.reqs)
 }
 
 func (s *Session) writeErrClose(msg string) {
@@ -207,11 +211,7 @@ func (s *Session) handleReqs(in <-chan *ssh.Request) {
 	}
 }
 
-func (s *Session) Handle() {
-	go s.handleReqs(s.reqs)
-}
-
-func (s *Session) startClientSession(cmd string) {
+func (s *Session) startClientSession(cmd string) error {
 	var err error
 
 	user := s.username
@@ -231,8 +231,7 @@ func (s *Session) startClientSession(cmd string) {
 		Log:     s.SugaredLogger,
 	})
 	if err != nil {
-		s.errs <- errors.Wrap(err, "failed to create client")
-		return
+		return errors.Wrap(err, "failed to create client")
 	}
 	s.client = c
 
@@ -240,9 +239,12 @@ func (s *Session) startClientSession(cmd string) {
 		PTYRequested: s.ptyRequested,
 		PTYPayload:   s.ptyPayload,
 	})
+	if err != nil {
+		return errors.Wrap(err, "failed to allocate session")
+	}
 	s.session = sess
 
-	log := logger.SessionLogger{
+	s.log = &logger.SessionLogger{
 		Logger: logger.Logger{
 			ClientIn:   s.Channel,
 			ClientOut:  s.Channel,
@@ -260,19 +262,32 @@ func (s *Session) startClientSession(cmd string) {
 		PTYRows:   s.ptyPayload.Rows,
 		Command:   cmd,
 	}
-	go log.Start()
+	return nil
 }
 
 func (s *Session) doExec(cmd string) {
-	s.startClientSession(cmd)
-	defer s.session.Close()
-	defer s.client.Close()
+	err := s.startClientSession(cmd)
+	if err != nil {
+		s.errs <- err
+		return
+	}
 	defer s.Close()
+	defer s.client.Close()
+	defer s.session.Close()
+
+	logDone := make(chan bool, 1)
+	go func() {
+		s.log.Start()
+		logDone <- true
+	}()
+	defer func() {
+		<-logDone
+	}()
 
 	runner := s.session.Shell
 	if cmd != "" {
 		runner = func() error {
-			return s.session.Run(cmd)
+			return s.session.Start(cmd)
 		}
 	} else {
 		cmd = "SHELL"
@@ -284,14 +299,16 @@ func (s *Session) doExec(cmd string) {
 		return
 	}
 	s.Infow("process spawned", "cmd", cmd)
-	err := s.session.Wait()
+	err = s.session.Wait()
 	s.Infow("process exited", "cmd", cmd, "err", err)
 
 	var exitStatus requests.ExitStatusMsg
 	if err == nil {
 		s.SendRequest("exit-status", false, ssh.Marshal(exitStatus))
+		s.Infow("sent exit 0")
 	} else if _, ok := err.(*ssh.ExitMissingError); ok {
 		// ¯\_(ツ)_/¯
+		s.Warn("remote exited without status or signal")
 	} else if eerr, ok := err.(*ssh.ExitError); ok {
 		exitStatus.ExitStatus = uint32(eerr.ExitStatus())
 		s.SendRequest("exit-status", false, ssh.Marshal(exitStatus))

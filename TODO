@@ -8,6 +8,8 @@
 ☐ Privilege drop
 ☐ keepalives
 ☐ Compress sudoreplay logs
+☐ Tests
+☐ Useful messages when auth failed
 
 
 No support at moment due to unnecessity, maybe sometime:

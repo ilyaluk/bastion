@@ -210,8 +210,8 @@ func (tl *TCPLogger) Start() (err error) {
 	tl.SentDst = 1
 
 	errs := make(chan error)
-	tl.startLog(tl.ClientIn, tl.ServerIn, w1, errs)
-	tl.startLog(tl.ServerOut, tl.ClientOut, w2, errs)
+	go tl.startLog(tl.ClientIn, tl.ServerIn, w1, errs)
+	go tl.startLog(tl.ServerOut, tl.ClientOut, w2, errs)
 
 	// TODO: handle errors
 	<-errs

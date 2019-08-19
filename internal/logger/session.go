@@ -151,13 +151,13 @@ func (sl *SessionLogger) Start() (err error) {
 
 	errs := make(chan error)
 	if !sl.PTY {
-		sl.startLog(sl.ClientIn, sl.ServerIn, logs[0], errs)
-		sl.startLog(sl.ServerOut, sl.ClientOut, logs[1], errs)
+		go sl.startLog(sl.ClientIn, sl.ServerIn, logs[0], errs)
+		go sl.startLog(sl.ServerOut, sl.ClientOut, logs[1], errs)
 		// client stderr is extended channel and not needed to be closed
-		sl.startLog(sl.ServerErr, writeDummyCloser{sl.ClientErr}, logs[2], errs)
+		go sl.startLog(sl.ServerErr, writeDummyCloser{sl.ClientErr}, logs[2], errs)
 	} else {
-		sl.startLog(sl.ClientIn, sl.ServerIn, logs[3], errs)
-		sl.startLog(sl.ServerOut, sl.ClientOut, logs[4], errs)
+		go sl.startLog(sl.ClientIn, sl.ServerIn, logs[3], errs)
+		go sl.startLog(sl.ServerOut, sl.ClientOut, logs[4], errs)
 	}
 
 	// TODO: handle errors

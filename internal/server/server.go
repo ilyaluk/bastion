@@ -57,7 +57,7 @@ func (s *Server) start() (err error) {
 		}
 		defer conn.Close()
 
-		s.Infow("new connection from", "addr", conn.RemoteAddr())
+		s.Infow("new connection", "addr", conn.RemoteAddr())
 		go s.handleConn(conn)
 	}
 }

@@ -160,7 +160,7 @@ func (s *Server) handleChannels(chans <-chan ssh.NewChannel, errs chan<- error) 
 				continue
 			}
 
-			sess, err := NewSession(ch, &sessionConfig{
+			go HandleSession(ch, &sessionConfig{
 				SugaredLogger: s.SugaredLogger,
 				conf:          s.Conf,
 				errs:          errs,
@@ -169,11 +169,6 @@ func (s *Server) handleChannels(chans <-chan ssh.NewChannel, errs chan<- error) 
 				sessId:        s.sessId,
 				clientProv:    s.clientProvider,
 			})
-			if err != nil {
-				errs <- errors.Wrap(err, "error creating session")
-				continue
-			}
-			go sess.Handle()
 
 		case "direct-tcpip":
 			var tcpForwardReq requests.ChannelOpenDirectMsg
@@ -236,13 +231,12 @@ func (s *Server) ProcessConnection() (err error) {
 	defer conn.Close()
 
 	s.SugaredLogger = s.SugaredLogger.With(
-		"user", conn.User(),
-		"sessid", conn.SessionID(),
+		"sessid", conn.SessionID()[:6], // save some space in logs
 	)
 	s.username = conn.User()
 	s.sessId = conn.SessionID()
 	s.sshConn = conn
-	s.Info("authentication succeded")
+	s.Infow("authentication succeded", "user", conn.User())
 
 	s.agent = &ClientAgent{
 		SugaredLogger: s.SugaredLogger,

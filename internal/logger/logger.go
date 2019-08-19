@@ -26,12 +26,9 @@ func (l *Logger) folder() string {
 	return path.Join(l.RootFolder, l.Username, l.Hostname, sessId)
 }
 
-func (l *Logger) startLog(r io.Reader, w io.WriteCloser, log io.WriteCloser, errs chan<- error) error {
-	go func() {
-		_, err := io.Copy(w, io.TeeReader(r, log))
-		w.Close()
-		log.Close()
-		errs <- err
-	}()
-	return nil
+func (l *Logger) startLog(r io.Reader, w io.WriteCloser, log io.WriteCloser, errs chan<- error) {
+	_, err := io.Copy(w, io.TeeReader(r, log))
+	w.Close()
+	log.Close()
+	errs <- err
 }
