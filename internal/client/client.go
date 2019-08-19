@@ -37,7 +37,7 @@ type SessionConfig struct {
 type Session struct {
 	*ssh.Session
 
-	Stdin  io.Writer
+	Stdin  io.WriteCloser
 	Stdout io.Reader
 	Stderr io.Reader
 }

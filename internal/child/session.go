@@ -147,6 +147,10 @@ func (s *Session) handleReqs(in <-chan *ssh.Request) {
 
 		case "auth-agent-req@openssh.com":
 			s.agentRequested = true
+			// TODO: remove after golang.org/cl/190777
+			if req.WantReply {
+				req.Reply(true, nil)
+			}
 
 		case "shell":
 			req.Reply(true, nil)
@@ -244,7 +248,7 @@ func (s *Session) startClientSession(cmd string) {
 			ClientOut:  s.Channel,
 			ServerIn:   sess.Stdin,
 			ServerOut:  sess.Stdout,
-			Username:   s.username,
+			Username:   user,
 			Hostname:   host,
 			SessId:     s.sessId,
 			RootFolder: s.conf.LogFolder,
@@ -311,10 +315,18 @@ func (s *Session) startExec(cmd string) {
 }
 
 func (s *Session) sendSignal(sig string) error {
+	// TODO: wait for it
+	if s.session == nil {
+		return errors.New("session is not ready yet")
+	}
 	return s.session.Signal(ssh.Signal(sig))
 }
 
 func (s *Session) windowChange(h, w uint32) error {
+	// TODO: wait for it
+	if s.session == nil {
+		return errors.New("session is not ready yet")
+	}
 	return s.session.WindowChange(int(h), int(w))
 }
 

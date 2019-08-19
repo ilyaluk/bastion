@@ -5,6 +5,7 @@ import (
 	"io/ioutil"
 	"net"
 	"os"
+	"os/user"
 	"sync"
 
 	"github.com/ilyaluk/bastion/internal/client"
@@ -21,7 +22,6 @@ type Server struct {
 	Conf config.Child
 	*zap.SugaredLogger
 
-	authorizedKeys map[string]bool
 	username       string
 	sessId         []byte
 	noMoreSessions bool
@@ -70,26 +70,6 @@ func (ca *ClientAgent) Close() {
 	}
 }
 
-func (s *Server) readAuthorizedKeys() error {
-	data, err := ioutil.ReadFile(s.Conf.AuthorizedKeys)
-	if err != nil {
-		return err
-	}
-
-	s.authorizedKeys = map[string]bool{}
-	for len(data) > 0 {
-		pubKey, _, _, rest, err := ssh.ParseAuthorizedKey(data)
-		if err != nil {
-			return err
-		}
-
-		s.authorizedKeys[string(pubKey.Marshal())] = true
-		data = rest
-	}
-
-	return nil
-}
-
 func (s *Server) readHostKey() (sign ssh.Signer, err error) {
 	privateBytes, err := ioutil.ReadFile(s.Conf.HostKey)
 	if err != nil {
@@ -98,9 +78,41 @@ func (s *Server) readHostKey() (sign ssh.Signer, err error) {
 	return ssh.ParsePrivateKey(privateBytes)
 }
 
-func (s *Server) checkPublicKey(sc ssh.ConnMetadata, pubKey ssh.PublicKey) (*ssh.Permissions, error) {
+func readAuthorizedKeys(fname string) (map[string]bool, error) {
+	data, err := ioutil.ReadFile(fname)
+	if err != nil {
+		return nil, err
+	}
+
+	ak := map[string]bool{}
+	for len(data) > 0 {
+		pubKey, _, _, rest, err := ssh.ParseAuthorizedKey(data)
+		if err != nil {
+			return nil, err
+		}
+
+		ak[string(pubKey.Marshal())] = true
+		data = rest
+	}
+
+	return ak, nil
+}
+
+func (s *Server) authCallback(sc ssh.ConnMetadata, pubKey ssh.PublicKey) (*ssh.Permissions, error) {
+	usr, err := user.Lookup(sc.User())
+	if err != nil {
+		return nil, errors.Wrap(err, "cannot lookup user")
+	}
+	if usr.HomeDir == "" {
+		return nil, errors.New("user have no homedir")
+	}
+	ak, err := readAuthorizedKeys(fmt.Sprintf("%s/.ssh/authorized_keys", usr.HomeDir))
+	if err != nil {
+		return nil, errors.Wrap(err, "cannot read authorized_keys")
+	}
+
 	fp := ssh.FingerprintSHA256(pubKey)
-	if s.authorizedKeys[string(pubKey.Marshal())] {
+	if ak[string(pubKey.Marshal())] {
 		s.Infow("client offered valid key",
 			"user", sc.User(),
 			"pubkey-fp", fp,
@@ -181,6 +193,8 @@ func (s *Server) handleChannels(chans <-chan ssh.NewChannel, errs chan<- error) 
 					sessId:        s.sessId,
 					clientProv:    s.clientProvider,
 				},
+				srcHost: tcpForwardReq.LAddr,
+				srcPort: uint16(tcpForwardReq.LPort),
 				dstHost: tcpForwardReq.RAddr,
 				dstPort: uint16(tcpForwardReq.RPort),
 			})
@@ -203,10 +217,6 @@ func (s *Server) ProcessConnection() (err error) {
 	}
 	defer nConn.Close()
 
-	if err = s.readAuthorizedKeys(); err != nil {
-		return errors.Wrap(err, "failed to read authorized_keys")
-	}
-
 	hostKey, err := s.readHostKey()
 	if err != nil {
 		return errors.Wrap(err, "failed to read host key")
@@ -215,7 +225,7 @@ func (s *Server) ProcessConnection() (err error) {
 	serverConf := &ssh.ServerConfig{
 		// OpenSSH-specific extensions compatibility
 		ServerVersion:     "SSH-2.0-OpenSSH_Go_Bastion",
-		PublicKeyCallback: s.checkPublicKey,
+		PublicKeyCallback: s.authCallback,
 	}
 	serverConf.AddHostKey(hostKey)
 

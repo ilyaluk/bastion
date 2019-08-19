@@ -3,7 +3,6 @@ server:
   child_args: ['run', 'cmd/bastion-child/child.go', 'config.yaml']
   listen_addr: 127.0.0.1:2022
 child:
-  authorized_keys: ./authorized_keys
   host_key: ./id_rsa
   connect_timeout: 5
   log_folder: /tmp/logs

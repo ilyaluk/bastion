@@ -10,6 +10,30 @@ import (
 	"time"
 )
 
+// type zlibWriteCloser struct {
+// 	file io.WriteCloser
+// 	comp io.WriteCloser
+// }
+
+// func newZlibWriteCloser(f io.WriteCloser) *zlibWriteCloser {
+// 	return &zlibWriteCloser{
+// 		file: f,
+// 		comp: zlib.NewWriter(f),
+// 	}
+// }
+
+// func (zwc zlibWriteCloser) Write(p []byte) (int, error) {
+// 	fmt.Printf("%v %#v\n", zwc, p)
+// 	return zwc.comp.Write(p)
+// }
+
+// func (zwc zlibWriteCloser) Close() error {
+// 	// TODO: check err
+// 	// TODO: panics here
+// 	zwc.comp.Close()
+// 	return zwc.file.Close()
+// }
+
 type SessionLogger struct {
 	Logger
 
@@ -21,6 +45,14 @@ type SessionLogger struct {
 	Command   string
 
 	timer *Timer
+}
+
+type writeDummyCloser struct {
+	io.Writer
+}
+
+func (wdc writeDummyCloser) Close() error {
+	return nil
 }
 
 type Timer struct {
@@ -72,14 +104,16 @@ func (sl *SessionLogger) createFiles() (res []io.WriteCloser, timing io.WriteClo
 	if err != nil {
 		return
 	}
+	// timing = newZlibWriteCloser(timing)
 
 	for id, fname := range []string{"stdin", "stdout", "stderr", "ttyin", "ttyout"} {
 		log, err := os.Create(path.Join(sl.folder(), fname))
 		if err != nil {
 			return res, timing, err
 		}
+
 		tw := TimingWriter{
-			log:    log,
+			log:    log, //newZlibWriteCloser(log),
 			timing: timing,
 			id:     id,
 			timer:  sl.timer,
@@ -119,7 +153,8 @@ func (sl *SessionLogger) Start() (err error) {
 	if !sl.PTY {
 		sl.startLog(sl.ClientIn, sl.ServerIn, logs[0], errs)
 		sl.startLog(sl.ServerOut, sl.ClientOut, logs[1], errs)
-		sl.startLog(sl.ServerErr, sl.ClientErr, logs[2], errs)
+		// client stderr is extended channel and not needed to be closed
+		sl.startLog(sl.ServerErr, writeDummyCloser{sl.ClientErr}, logs[2], errs)
 	} else {
 		sl.startLog(sl.ClientIn, sl.ServerIn, logs[3], errs)
 		sl.startLog(sl.ServerOut, sl.ClientOut, logs[4], errs)

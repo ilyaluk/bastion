@@ -12,6 +12,8 @@ import (
 
 type tcpConfig struct {
 	channelConfig
+	srcHost string
+	srcPort uint16
 	dstHost string
 	dstPort uint16
 }
@@ -22,6 +24,7 @@ func HandleTCP(ch ssh.NewChannel, tc *tcpConfig) {
 
 	tc.Info("getting ssh client")
 	c, err := tc.clientProv.GetClient(&client.Config{
+		// TODO: read user from some session env?
 		User:    tc.username,
 		Host:    tc.dstHost,
 		Port:    22,
@@ -30,7 +33,8 @@ func HandleTCP(ch ssh.NewChannel, tc *tcpConfig) {
 		Log:     tc.SugaredLogger,
 	})
 	if err != nil {
-		tc.errs <- errors.Wrap(err, "failed to create client")
+		ch.Reject(ssh.ConnectionFailed, "")
+		tc.Warnw("failed to create client for tcp", "err", err)
 		return
 	}
 	defer c.Close()
@@ -51,6 +55,8 @@ func HandleTCP(ch ssh.NewChannel, tc *tcpConfig) {
 		return
 	}
 	tc.Info("accepted tcp channel")
+
+	// no requests here
 	go ssh.DiscardRequests(reqs)
 
 	defer channel.Close()
@@ -69,8 +75,8 @@ func HandleTCP(ch ssh.NewChannel, tc *tcpConfig) {
 		// TODO
 		Src:     net.IP{127, 0, 0, 1},
 		Dst:     net.IP{8, 8, 8, 8},
-		SrcPort: 1337,
-		DstPort: 7331,
+		SrcPort: tc.srcPort,
+		DstPort: tc.dstPort,
 	}
 	log.Start()
 }

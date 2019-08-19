@@ -14,7 +14,6 @@ type Server struct {
 }
 
 type Child struct {
-	AuthorizedKeys    string        `yaml:"authorized_keys"`
 	HostKey           string        `yaml:"host_key"`
 	connectTimeoutInt uint          `yaml:"connect_timeout"`
 	ConnectTimeout    time.Duration `yaml:"-"`

@@ -1,0 +1,20 @@
+☐ Refactor
+☐ Refactor logs
+☐ Key auth: CA
+☐ Agent forwarding
+☐ ACLs: host to connect to/tcp forwarding
+☐ Decoupling
+☐ Isolation
+☐ Privilege drop
+☐ keepalives
+☐ Compress sudoreplay logs
+
+
+No support at moment due to unnecessity, maybe sometime:
+☐ forwarded UDS
+☐ subsystem
+☐ hostkeys
+☐ -R
+☐ x11
+☐ tun
+☐ xon-xoff
