@@ -13,6 +13,7 @@ type Server struct {
 	ListenAddr string   `yaml:"listen_addr"`
 }
 
+//noinspection GoStructTag
 type Child struct {
 	HostKey           string        `yaml:"host_key"`
 	connectTimeoutInt uint          `yaml:"connect_timeout"`

@@ -94,7 +94,10 @@ func (c *Client) NewSession(sc SessionConfig) (s *Session, err error) {
 		if err != nil {
 			return nil, err
 		}
-		sess.RequestPty(pty.Term, int(pty.Rows), int(pty.Columns), ml)
+		err = sess.RequestPty(pty.Term, int(pty.Rows), int(pty.Columns), ml)
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	stdin, err := sess.StdinPipe()

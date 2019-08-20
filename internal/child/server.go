@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"io/ioutil"
 	"net"
-	"os"
 	"os/user"
 	"sync"
 
@@ -137,14 +136,14 @@ func (s *Server) handleGlobalReqs(reqs <-chan *ssh.Request) {
 		s.Infow("global request", "req", req)
 		switch req.Type {
 		case "keepalive@openssh.com":
-			req.Reply(true, nil)
+			_ = req.Reply(true, nil)
 		// TODO: race condition because of this
 		// case "no-more-sessions@openssh.com":
 		// 	s.noMoreSessions = true
 		default:
 			// "[cancel-]tcpip-forward" falls here
 			if req.WantReply {
-				req.Reply(false, nil)
+				_ = req.Reply(false, nil)
 			}
 		}
 	}
@@ -156,7 +155,7 @@ func (s *Server) handleChannels(chans <-chan ssh.NewChannel, errs chan<- error) 
 		switch ch.ChannelType() {
 		case "session":
 			if s.noMoreSessions {
-				ch.Reject(ssh.Prohibited, "no-more-sessions was sent")
+				errs <- ch.Reject(ssh.Prohibited, "no-more-sessions was sent")
 				continue
 			}
 
@@ -195,23 +194,16 @@ func (s *Server) handleChannels(chans <-chan ssh.NewChannel, errs chan<- error) 
 			})
 
 		case "x11", "forwarded-tcpip", "tun@openssh.com", "direct-streamlocal@openssh.com", "forwarded-streamlocal@openssh.com":
-			ch.Reject(ssh.Prohibited, fmt.Sprintf("using %s is prohibited", ch.ChannelType()))
+			errs <- ch.Reject(ssh.Prohibited, fmt.Sprintf("using %s is prohibited", ch.ChannelType()))
 		default:
-			ch.Reject(ssh.UnknownChannelType, "unknown channel type")
+			errs <- ch.Reject(ssh.UnknownChannelType, "unknown channel type")
 		}
 	}
 
 	close(errs)
 }
 
-func (s *Server) ProcessConnection() (err error) {
-	// create client connection from fd
-	nConn, err := net.FileConn(os.NewFile(3, "nConn"))
-	for err != nil {
-		return errors.Wrap(err, "failed to create client conn")
-	}
-	defer nConn.Close()
-
+func (s *Server) ProcessConnection(nConn net.Conn) (err error) {
 	hostKey, err := s.readHostKey()
 	if err != nil {
 		return errors.Wrap(err, "failed to read host key")

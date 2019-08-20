@@ -48,29 +48,45 @@ func writePacket(pw *pcapgo.NgWriter, layers ...gopacket.SerializableLayer) (err
 	return pw.WritePacket(ci, buf.Bytes())
 }
 
+func (pw PcapWriter) getIP(rev bool) *layers.IPv4 {
+	src, dst := pw.Src, pw.Dst
+	if rev {
+		src, dst = dst, src
+	}
+	return &layers.IPv4{
+		Version:  4,
+		TTL:      64,
+		SrcIP:    src,
+		DstIP:    dst,
+		Protocol: layers.IPProtocolTCP,
+	}
+}
+
+func (pw PcapWriter) getTCP(rev, SYN, ACK, PSH bool, seq, ack uint32) *layers.TCP {
+	src, dst := layers.TCPPort(pw.SrcPort), layers.TCPPort(pw.DstPort)
+	if rev {
+		src, dst = dst, src
+	}
+	return &layers.TCP{
+		Window:  65535,
+		SrcPort: src,
+		DstPort: dst,
+		SYN:     SYN,
+		PSH:     PSH,
+		ACK:     ACK,
+		Seq:     seq,
+		Ack:     ack,
+	}
+}
+
 func (pw PcapWriter) Close() error {
 	return pw.Flush()
 }
 
 func (pw PcapWriter) Write(p []byte) (n int, err error) {
-	// TODO: refactor packet writingf
 	err = writePacket(pw.NgWriter,
-		&layers.IPv4{
-			Version:  4,
-			TTL:      64,
-			SrcIP:    pw.Src,
-			DstIP:    pw.Dst,
-			Protocol: layers.IPProtocolTCP,
-		},
-		&layers.TCP{
-			Window:  65535,
-			SrcPort: layers.TCPPort(pw.SrcPort),
-			DstPort: layers.TCPPort(pw.DstPort),
-			PSH:     true,
-			ACK:     true,
-			Seq:     *pw.SentSrc,
-			Ack:     *pw.SentDst,
-		},
+		pw.getIP(false),
+		pw.getTCP(false, false, true, true, *pw.SentSrc, *pw.SentDst),
 		gopacket.Payload(p),
 	)
 	if err != nil {
@@ -78,21 +94,8 @@ func (pw PcapWriter) Write(p []byte) (n int, err error) {
 	}
 	*pw.SentSrc += uint32(len(p))
 	err = writePacket(pw.NgWriter,
-		&layers.IPv4{
-			Version:  4,
-			TTL:      64,
-			SrcIP:    pw.Dst,
-			DstIP:    pw.Src,
-			Protocol: layers.IPProtocolTCP,
-		},
-		&layers.TCP{
-			Window:  65535,
-			SrcPort: layers.TCPPort(pw.DstPort),
-			DstPort: layers.TCPPort(pw.SrcPort),
-			ACK:     true,
-			Seq:     *pw.SentDst,
-			Ack:     *pw.SentSrc,
-		},
+		pw.getIP(true),
+		pw.getTCP(true, false, true, false, *pw.SentDst, *pw.SentSrc),
 	)
 	if err != nil {
 		return
@@ -103,68 +106,31 @@ func (pw PcapWriter) Write(p []byte) (n int, err error) {
 
 func writeHandshake(pw PcapWriter) (err error) {
 	err = writePacket(pw.NgWriter,
-		&layers.IPv4{
-			Version:  4,
-			TTL:      64,
-			SrcIP:    pw.Src,
-			DstIP:    pw.Dst,
-			Protocol: layers.IPProtocolTCP,
-		},
-		&layers.TCP{
-			Window:  65535,
-			SrcPort: layers.TCPPort(pw.SrcPort),
-			DstPort: layers.TCPPort(pw.DstPort),
-			SYN:     true,
-			Seq:     0,
-			Ack:     0,
-		},
+		pw.getIP(false),
+		pw.getTCP(false, true, false, false, 0, 0),
 	)
 	if err != nil {
 		return
 	}
 	err = writePacket(pw.NgWriter,
-		&layers.IPv4{
-			Version:  4,
-			TTL:      64,
-			SrcIP:    pw.Dst,
-			DstIP:    pw.Src,
-			Protocol: layers.IPProtocolTCP,
-		},
-		&layers.TCP{
-			Window:  65535,
-			SrcPort: layers.TCPPort(pw.DstPort),
-			DstPort: layers.TCPPort(pw.SrcPort),
-			SYN:     true,
-			ACK:     true,
-			Seq:     0,
-			Ack:     1,
-		},
+		pw.getIP(true),
+		pw.getTCP(true, true, true, false, 0, 1),
 	)
 	if err != nil {
 		return
 	}
 	err = writePacket(pw.NgWriter,
-		&layers.IPv4{
-			Version:  4,
-			TTL:      64,
-			SrcIP:    pw.Src,
-			DstIP:    pw.Dst,
-			Protocol: layers.IPProtocolTCP,
-		},
-		&layers.TCP{
-			Window:  65535,
-			SrcPort: layers.TCPPort(pw.SrcPort),
-			DstPort: layers.TCPPort(pw.DstPort),
-			ACK:     true,
-			Seq:     1,
-			Ack:     1,
-		},
+		pw.getIP(false),
+		pw.getTCP(false, false, true, false, 1, 1),
 	)
 	return
 }
 
 func (tl *TCPLogger) Start() (err error) {
-	os.MkdirAll(tl.folder(), 0700)
+	err = os.MkdirAll(tl.folder(), 0700)
+	if err != nil {
+		return
+	}
 
 	// TODO: check for name conflicts?
 	ts := time.Now().Format("2006-01-02T15:04:05.999999")
@@ -205,7 +171,10 @@ func (tl *TCPLogger) Start() (err error) {
 		SentDst:  &tl.SentSrc,
 	}
 
-	writeHandshake(w1)
+	err = writeHandshake(w1)
+	if err != nil {
+		return
+	}
 	tl.SentSrc = 1
 	tl.SentDst = 1
 

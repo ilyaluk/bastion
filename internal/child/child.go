@@ -1,9 +1,11 @@
 package child
 
 import (
+	"net"
 	"os"
 
 	"github.com/ilyaluk/bastion/internal/config"
+	"github.com/pkg/errors"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 )
@@ -28,11 +30,18 @@ func Run() (err error) {
 	}
 	log.Infow("loaded config", "conf", conf.Child)
 
+	// create client connection from fd
+	nConn, err := net.FileConn(os.NewFile(3, "nConn"))
+	for err != nil {
+		return errors.Wrap(err, "failed to create client conn")
+	}
+	defer nConn.Close()
+
 	server := Server{
 		Conf:          conf.Child,
 		SugaredLogger: log,
 	}
-	if err = server.ProcessConnection(); err != nil {
+	if err = server.ProcessConnection(nConn); err != nil {
 		log.Errorw("error while handling connection", "err", err)
 		return
 	}

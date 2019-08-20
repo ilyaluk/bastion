@@ -78,7 +78,7 @@ func ParseModelist(data []byte) (res map[uint8]uint32, err error) {
 			return res, fmt.Errorf("invalid rest data len %d, op %d", len(data), op)
 		}
 
-		if 160 <= op && op <= 255 {
+		if op >= 160 {
 			return res, fmt.Errorf("unexpected opcode %d", op)
 		}
 		arg := binary.BigEndian.Uint32(data[1:5])

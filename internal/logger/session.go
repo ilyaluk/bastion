@@ -88,8 +88,7 @@ func (tw TimingWriter) Write(p []byte) (n int, err error) {
 	}
 	secDiff := float64(tw.timer.GetDiff()) / float64(time.Second)
 	te := fmt.Sprintf("%d %.6f %d\n", tw.id, secDiff, n)
-	// TODO: check err
-	tw.timing.Write([]byte(te))
+	_, err = tw.timing.Write([]byte(te))
 	return
 }
 
@@ -127,7 +126,10 @@ func (sl *SessionLogger) Start() (err error) {
 	sl.timer = &Timer{}
 	sl.timer.Init()
 
-	os.MkdirAll(sl.folder(), 0700)
+	err = os.MkdirAll(sl.folder(), 0700)
+	if err != nil {
+		return
+	}
 
 	if sl.Command == "" {
 		sl.Command = "/SHELL"
