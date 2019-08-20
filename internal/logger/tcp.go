@@ -48,10 +48,19 @@ func writePacket(pw *pcapgo.NgWriter, layers ...gopacket.SerializableLayer) (err
 	return pw.WritePacket(ci, buf.Bytes())
 }
 
-func (pw PcapWriter) getIP(rev bool) *layers.IPv4 {
+func (pw PcapWriter) getIP(rev bool) gopacket.SerializableLayer {
 	src, dst := pw.Src, pw.Dst
 	if rev {
 		src, dst = dst, src
+	}
+	if len(src) == 16 {
+		return &layers.IPv6{
+			Version:    6,
+			HopLimit:   64,
+			SrcIP:      src,
+			DstIP:      dst,
+			NextHeader: layers.IPProtocolTCP,
+		}
 	}
 	return &layers.IPv4{
 		Version:  4,

@@ -274,6 +274,7 @@ func (s *Session) doExec(cmd string) {
 		s.errs <- err
 		return
 	}
+	// TODO: still race somewhere, not sending exit-status
 	defer s.Close()
 	defer s.client.Close()
 	defer s.session.Close()

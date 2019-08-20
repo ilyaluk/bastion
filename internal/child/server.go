@@ -131,54 +131,23 @@ func (s *Server) authCallback(sc ssh.ConnMetadata, pubKey ssh.PublicKey) (*ssh.P
 	return nil, fmt.Errorf("unknown public key for %q", sc.User())
 }
 
-func (s *Server) handleGlobalReqs(reqs <-chan *ssh.Request) {
-	for req := range reqs {
-		s.Infow("global request", "req", req)
-		switch req.Type {
-		case "keepalive@openssh.com":
-			_ = req.Reply(true, nil)
-		// TODO: race condition because of this
-		// case "no-more-sessions@openssh.com":
-		// 	s.noMoreSessions = true
-		default:
-			// "[cancel-]tcpip-forward" falls here
-			if req.WantReply {
-				_ = req.Reply(false, nil)
-			}
-		}
-	}
-}
-
-func (s *Server) handleChannels(chans <-chan ssh.NewChannel, errs chan<- error) {
-	for ch := range chans {
-		s.Infow("new channel request", "type", ch.ChannelType())
-		switch ch.ChannelType() {
-		case "session":
-			if s.noMoreSessions {
-				errs <- ch.Reject(ssh.Prohibited, "no-more-sessions was sent")
+func (s *Server) handleClient(chans <-chan ssh.NewChannel, reqs <-chan *ssh.Request, errs chan<- error) {
+	for {
+		select {
+		case ch, ok := <-chans:
+			if !ok {
+				chans = nil
 				continue
 			}
+			s.Infow("new channel request", "type", ch.ChannelType())
+			switch ch.ChannelType() {
+			case "session":
+				if s.noMoreSessions {
+					errs <- ch.Reject(ssh.Prohibited, "no-more-sessions was sent")
+					continue
+				}
 
-			go HandleSession(ch, &sessionConfig{
-				SugaredLogger: s.SugaredLogger,
-				conf:          s.Conf,
-				errs:          errs,
-				agent:         s.agent,
-				username:      s.username,
-				sessId:        s.sessId,
-				clientProv:    s.clientProvider,
-			})
-
-		case "direct-tcpip":
-			var tcpForwardReq requests.ChannelOpenDirectMsg
-			if err := ssh.Unmarshal(ch.ExtraData(), &tcpForwardReq); err != nil {
-				errs <- errors.Wrap(err, "error parsing tcpip request")
-				continue
-			}
-			s.Infow("tcpip request", "req", tcpForwardReq)
-
-			go HandleTCP(ch, &tcpConfig{
-				channelConfig: channelConfig{
+				go HandleSession(ch, &sessionConfig{
 					SugaredLogger: s.SugaredLogger,
 					conf:          s.Conf,
 					errs:          errs,
@@ -186,17 +155,60 @@ func (s *Server) handleChannels(chans <-chan ssh.NewChannel, errs chan<- error) 
 					username:      s.username,
 					sessId:        s.sessId,
 					clientProv:    s.clientProvider,
-				},
-				srcHost: tcpForwardReq.LAddr,
-				srcPort: uint16(tcpForwardReq.LPort),
-				dstHost: tcpForwardReq.RAddr,
-				dstPort: uint16(tcpForwardReq.RPort),
-			})
+				})
 
-		case "x11", "forwarded-tcpip", "tun@openssh.com", "direct-streamlocal@openssh.com", "forwarded-streamlocal@openssh.com":
-			errs <- ch.Reject(ssh.Prohibited, fmt.Sprintf("using %s is prohibited", ch.ChannelType()))
-		default:
-			errs <- ch.Reject(ssh.UnknownChannelType, "unknown channel type")
+			case "direct-tcpip":
+				var tcpForwardReq requests.ChannelOpenDirectMsg
+				if err := ssh.Unmarshal(ch.ExtraData(), &tcpForwardReq); err != nil {
+					errs <- errors.Wrap(err, "error parsing tcpip request")
+					continue
+				}
+				s.Infow("tcpip request", "req", tcpForwardReq)
+
+				go HandleTCP(ch, &tcpConfig{
+					channelConfig: channelConfig{
+						SugaredLogger: s.SugaredLogger,
+						conf:          s.Conf,
+						errs:          errs,
+						agent:         s.agent,
+						username:      s.username,
+						sessId:        s.sessId,
+						clientProv:    s.clientProvider,
+					},
+					srcHost: tcpForwardReq.LAddr,
+					srcPort: uint16(tcpForwardReq.LPort),
+					dstHost: tcpForwardReq.RAddr,
+					dstPort: uint16(tcpForwardReq.RPort),
+				})
+
+			case "x11", "forwarded-tcpip", "tun@openssh.com", "direct-streamlocal@openssh.com", "forwarded-streamlocal@openssh.com":
+				errs <- ch.Reject(ssh.Prohibited, fmt.Sprintf("using %s is prohibited", ch.ChannelType()))
+			default:
+				errs <- ch.Reject(ssh.UnknownChannelType, "unknown channel type")
+			}
+
+		case req, ok := <-reqs:
+			if !ok {
+				reqs = nil
+				continue
+			}
+			s.Infow("global request", "req", req)
+			switch req.Type {
+			case "keepalive@openssh.com":
+				errs <- req.Reply(true, nil)
+			// TODO: check for race condition here
+			case "no-more-sessions@openssh.com":
+				s.noMoreSessions = true
+			default:
+				// "[cancel-]tcpip-forward" falls here
+				if req.WantReply {
+					errs <- req.Reply(false, nil)
+				}
+			}
+		}
+
+		if chans == nil && reqs == nil {
+			break
 		}
 	}
 
@@ -237,8 +249,7 @@ func (s *Server) ProcessConnection(nConn net.Conn) (err error) {
 	s.clientProvider = client.NewProvider()
 
 	errs := make(chan error)
-	go s.handleChannels(chans, errs)
-	go s.handleGlobalReqs(globalReqs)
+	go s.handleClient(chans, globalReqs, errs)
 
 	for err := range errs {
 		if err != nil {
