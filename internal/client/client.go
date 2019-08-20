@@ -32,6 +32,7 @@ type Client struct {
 type SessionConfig struct {
 	PTYRequested bool
 	PTYPayload   requests.PTYRequestMsg
+	Requests     chan interface{}
 }
 
 type Session struct {
@@ -109,12 +110,14 @@ func (c *Client) NewSession(sc SessionConfig) (s *Session, err error) {
 		return nil, err
 	}
 
-	return &Session{
+	s = &Session{
 		Session: sess,
 		Stdin:   stdin,
 		Stdout:  stdout,
 		Stderr:  stderr,
-	}, nil
+	}
+	go s.handleReqs(sc.Requests)
+	return s, nil
 }
 
 func (c *Client) IncRefs() {
@@ -132,5 +135,18 @@ func (c *Client) Close() {
 	c.Infow("decreased refs on client agent", "refs", c.refs)
 	if c.refs == 0 {
 		c.Client.Close()
+	}
+}
+
+func (s *Session) handleReqs(ch <-chan interface{}) {
+	for r := range ch {
+		switch req := r.(type) {
+		case requests.PTYWindowChangeMsg:
+			_ = s.WindowChange(int(req.Rows), int(req.Columns))
+		case requests.SignalMsg:
+			_ = s.Signal(ssh.Signal(req.Signal))
+		case requests.EOWMsg:
+			_, _ = s.SendRequest("eow@openssh.com", false, nil)
+		}
 	}
 }

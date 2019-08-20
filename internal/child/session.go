@@ -26,7 +26,8 @@ type sessionConfig channelConfig
 type Session struct {
 	*sessionConfig
 	ssh.Channel
-	reqs <-chan *ssh.Request
+	reqs       <-chan *ssh.Request
+	clientReqs chan interface{}
 
 	env            map[string]string
 	ptyRequested   bool
@@ -56,6 +57,7 @@ func HandleSession(ch ssh.NewChannel, sc *sessionConfig) {
 		sessionConfig: sc,
 		Channel:       channel,
 		reqs:          reqs,
+		clientReqs:    make(chan interface{}),
 
 		env: make(map[string]string),
 	}
@@ -96,8 +98,8 @@ func (s *Session) handleReqs(in <-chan *ssh.Request) {
 		// validate if everything needed present
 		switch req.Type {
 		case "shell", "exec", "subsystem":
-			_, haveHost := s.env[NocauthHost]
-			if !haveHost {
+			_, ok := s.env[NocauthHost]
+			if !ok {
 				s.Warn("don't have host")
 				if req.Type != "subsystem" {
 					req.Reply(true, nil)
@@ -179,28 +181,28 @@ func (s *Session) handleReqs(in <-chan *ssh.Request) {
 			fallthrough
 
 		case "window-change":
-			var tmp requests.PTYWindowChangeMsg
-			err := ssh.Unmarshal(req.Payload, &tmp)
+			var changeMsg requests.PTYWindowChangeMsg
+			err := ssh.Unmarshal(req.Payload, &changeMsg)
 			if err != nil {
 				s.Errorw("error parsing window change req", "err", err)
 			} else {
-				s.Infow("window size changed", "req", tmp)
-				s.windowChange(tmp.Rows, tmp.Columns)
+				s.Infow("window size changed", "req", changeMsg)
+				s.clientReqs <- changeMsg
 			}
 
 		case "signal":
-			var tmp requests.SignalMsg
-			err := ssh.Unmarshal(req.Payload, &tmp)
+			var sigMsg requests.SignalMsg
+			err := ssh.Unmarshal(req.Payload, &sigMsg)
 			if err != nil {
 				s.Errorw("error parsing signal req", "err", err)
 			} else {
-				s.Infow("signal", "sig", tmp.Signal)
-				// TODO: validate?
-				s.sendSignal(tmp.Signal)
+				s.Infow("signal", "sig", sigMsg.Signal)
+				// TODO: validate signals?
+				s.clientReqs <- sigMsg
 			}
 
 		case "eow@openssh.com":
-			s.session.SendRequest("eow@openssh.com", false, nil)
+			s.clientReqs <- requests.EOWMsg{}
 
 		default:
 			if req.WantReply {
@@ -238,6 +240,7 @@ func (s *Session) startClientSession(cmd string) error {
 	sess, err := c.NewSession(client.SessionConfig{
 		PTYRequested: s.ptyRequested,
 		PTYPayload:   s.ptyPayload,
+		Requests:     s.clientReqs,
 	})
 	if err != nil {
 		return errors.Wrap(err, "failed to allocate session")
@@ -329,29 +332,4 @@ func (s *Session) startShell() {
 
 func (s *Session) startExec(cmd string) {
 	s.doExec(cmd)
-}
-
-func (s *Session) sendSignal(sig string) error {
-	// TODO: wait for it
-	if s.session == nil {
-		return errors.New("session is not ready yet")
-	}
-	return s.session.Signal(ssh.Signal(sig))
-}
-
-func (s *Session) windowChange(h, w uint32) error {
-	// TODO: wait for it
-	if s.session == nil {
-		return errors.New("session is not ready yet")
-	}
-	return s.session.WindowChange(int(h), int(w))
-}
-
-func (s *Session) requestPty(pty requests.PTYRequestMsg) error {
-	modes, err := requests.ParseModelist(pty.Modelist)
-	s.Infow("requesting pty", "pty", pty, "modes", modes)
-	if err != nil {
-		return err
-	}
-	return s.session.RequestPty(pty.Term, int(pty.Rows), int(pty.Columns), modes)
 }

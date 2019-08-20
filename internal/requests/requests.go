@@ -88,3 +88,5 @@ func ParseModelist(data []byte) (res map[uint8]uint32, err error) {
 	}
 	return
 }
+
+type EOWMsg struct{}
