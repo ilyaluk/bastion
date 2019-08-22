@@ -224,6 +224,7 @@ func (s *Session) startClientSession(cmd string) error {
 	// TODO: validate host
 	host := s.env[NocauthHost]
 
+	s.Info("getting client")
 	c, err := s.clientProv.GetClient(&client.Config{
 		User:    user,
 		Host:    host,
@@ -237,6 +238,7 @@ func (s *Session) startClientSession(cmd string) error {
 	}
 	s.client = c
 
+	s.Info("creating session")
 	sess, err := c.NewSession(client.SessionConfig{
 		PTYRequested: s.ptyRequested,
 		PTYPayload:   s.ptyPayload,
@@ -247,6 +249,7 @@ func (s *Session) startClientSession(cmd string) error {
 	}
 	s.session = sess
 
+	s.Info("creating logger")
 	s.log = &logger.SessionLogger{
 		Logger: logger.Logger{
 			ClientIn:   s.Channel,

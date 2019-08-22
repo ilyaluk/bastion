@@ -24,20 +24,23 @@ func NewProvider() *Provider {
 
 // GetClient get client from cache or creates new one with config
 func (cp *Provider) GetClient(conf *Config) (*Client, error) {
-	cp.Lock()
-	defer cp.Unlock()
-
 	host := Host{conf.User, conf.Host, conf.Port}
+
+	cp.Lock()
 	c, ok := cp.m[host]
+	cp.Unlock()
 	if ok {
 		c.IncRefs()
 		return c, nil
 	}
 
+	// Slow operation, ssh dialing and stuff, hence unlock before
 	client, err := New(conf)
 	if err != nil {
 		return nil, errors.Wrap(err, "error creating new client")
 	}
+	cp.Lock()
 	cp.m[host] = client
+	cp.Unlock()
 	return client, nil
 }
