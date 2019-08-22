@@ -6,3 +6,4 @@ child:
   host_key: ./id_rsa
   connect_timeout: 5
   log_folder: /tmp/logs
+  ca_keys: ca.pub

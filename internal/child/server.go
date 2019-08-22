@@ -27,6 +27,7 @@ type Server struct {
 	sshConn        *ssh.ServerConn
 	agent          *ClientAgent
 	clientProvider *client.Provider
+	certChecker    *ssh.CertChecker
 }
 
 type ClientAgent struct {
@@ -98,6 +99,31 @@ func readAuthorizedKeys(fname string) (map[string]bool, error) {
 }
 
 func (s *Server) authCallback(sc ssh.ConnMetadata, pubKey ssh.PublicKey) (*ssh.Permissions, error) {
+	keyFp := ssh.FingerprintSHA256(pubKey)
+
+	clientCert, ok := pubKey.(*ssh.Certificate)
+	if s.certChecker != nil && ok {
+		certFp := ssh.FingerprintSHA256(clientCert.SignatureKey)
+		perms, err := s.certChecker.Authenticate(sc, pubKey)
+		if err != nil {
+			s.Infow("client offered invalid certificate or error while checking it",
+				"err", err,
+				"user", sc.User(),
+				"pubkey-fp", keyFp,
+				"ca-fp", certFp,
+				"sessid", sc.SessionID(),
+			)
+			return nil, err
+		}
+		s.Infow("client offered valid certificate",
+			"user", sc.User(),
+			"pubkey-fp", keyFp,
+			"ca-fp", certFp,
+			"sessid", sc.SessionID(),
+		)
+		return perms, nil
+	}
+
 	usr, err := user.Lookup(sc.User())
 	if err != nil {
 		return nil, errors.Wrap(err, "cannot lookup user")
@@ -110,22 +136,17 @@ func (s *Server) authCallback(sc ssh.ConnMetadata, pubKey ssh.PublicKey) (*ssh.P
 		return nil, errors.Wrap(err, "cannot read authorized_keys")
 	}
 
-	fp := ssh.FingerprintSHA256(pubKey)
 	if ak[string(pubKey.Marshal())] {
 		s.Infow("client offered valid key",
 			"user", sc.User(),
-			"pubkey-fp", fp,
+			"pubkey-fp", keyFp,
 			"sessid", sc.SessionID(),
 		)
-		return &ssh.Permissions{
-			Extensions: map[string]string{
-				"pubkey-fp": fp,
-			},
-		}, nil
+		return &ssh.Permissions{}, nil
 	}
 	s.Infow("client offered invalid key",
 		"user", sc.User(),
-		"pubkey-fp", fp,
+		"pubkey-fp", keyFp,
 		"sessid", sc.SessionID(),
 	)
 	return nil, fmt.Errorf("unknown public key for %q", sc.User())
@@ -219,6 +240,21 @@ func (s *Server) ProcessConnection(nConn net.Conn) (err error) {
 	hostKey, err := s.readHostKey()
 	if err != nil {
 		return errors.Wrap(err, "failed to read host key")
+	}
+
+	if s.Conf.CAKeys != "" {
+		caKeys, err := readAuthorizedKeys(s.Conf.CAKeys)
+		if err != nil {
+			return errors.Wrap(err, "failed to read CA keys")
+		}
+		s.certChecker = &ssh.CertChecker{
+			// TODO: implement source-addr checks
+			SupportedCriticalOptions: []string{},
+			IsUserAuthority: func(auth ssh.PublicKey) bool {
+				_, ok := caKeys[string(auth.Marshal())]
+				return ok
+			},
+		}
 	}
 
 	serverConf := &ssh.ServerConfig{

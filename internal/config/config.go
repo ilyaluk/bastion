@@ -19,6 +19,7 @@ type Child struct {
 	connectTimeoutInt uint          `yaml:"connect_timeout"`
 	ConnectTimeout    time.Duration `yaml:"-"`
 	LogFolder         string        `yaml:"log_folder"`
+	CAKeys            string        `yaml:"ca_keys"`
 }
 
 type Config struct {
