@@ -154,6 +154,10 @@ func (s *Server) authCallback(sc ssh.ConnMetadata, pubKey ssh.PublicKey) (*ssh.P
 
 func (s *Server) handleClient(chans <-chan ssh.NewChannel, reqs <-chan *ssh.Request, errs chan<- error) {
 	for {
+		if chans == nil && reqs == nil {
+			break
+		}
+
 		select {
 		case ch, ok := <-chans:
 			if !ok {
@@ -226,10 +230,6 @@ func (s *Server) handleClient(chans <-chan ssh.NewChannel, reqs <-chan *ssh.Requ
 					errs <- req.Reply(false, nil)
 				}
 			}
-		}
-
-		if chans == nil && reqs == nil {
-			break
 		}
 	}
 
