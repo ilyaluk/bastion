@@ -2,8 +2,6 @@ package client
 
 import (
 	"sync"
-
-	"github.com/pkg/errors"
 )
 
 type Host struct {
@@ -37,7 +35,7 @@ func (cp *Provider) GetClient(conf *Config) (*Client, error) {
 	// Slow operation, ssh dialing and stuff, hence unlock before
 	client, err := New(conf)
 	if err != nil {
-		return nil, errors.Wrap(err, "error creating new client")
+		return nil, err
 	}
 	cp.Lock()
 	cp.m[host] = client

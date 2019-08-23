@@ -79,7 +79,8 @@ func HandleSession(ch ssh.NewChannel, sc *sessionConfig) {
 
 func (s *Session) writeErrClose(msg string) {
 	// TODO: errors, full write
-	s.Channel.Write([]byte(msg + "\r\n"))
+	s.Write([]byte(msg + "\r\n"))
+	s.SendRequest("exit-status", false, ssh.Marshal(requests.ExitStatusMsg{1}))
 	s.Close()
 }
 
@@ -286,6 +287,8 @@ func (s *Session) startClientSession(cmd string) error {
 func (s *Session) doExec(cmd string) {
 	err := s.startClientSession(cmd)
 	if err != nil {
+		// TODO: maybe do not expose full errors
+		s.writeErrClose(err.Error())
 		s.errs <- err
 		return
 	}
