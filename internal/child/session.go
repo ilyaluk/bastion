@@ -45,6 +45,18 @@ const (
 	NocauthHost = "NOCAUTH_HOST"
 )
 
+type channelWriteCloser struct {
+	c ssh.Channel
+}
+
+func (wc channelWriteCloser) Write(p []byte) (int, error) {
+	return wc.c.Write(p)
+}
+
+func (wc channelWriteCloser) Close() error {
+	return wc.c.CloseWrite()
+}
+
 func HandleSession(ch ssh.NewChannel, sc *sessionConfig) {
 	channel, reqs, err := ch.Accept()
 	if err != nil {
@@ -253,7 +265,7 @@ func (s *Session) startClientSession(cmd string) error {
 	s.log = &logger.SessionLogger{
 		Logger: logger.Logger{
 			ClientIn:   s.Channel,
-			ClientOut:  s.Channel,
+			ClientOut:  channelWriteCloser{s.Channel},
 			ServerIn:   sess.Stdin,
 			ServerOut:  sess.Stdout,
 			Username:   user,
@@ -277,19 +289,11 @@ func (s *Session) doExec(cmd string) {
 		s.errs <- err
 		return
 	}
-	// TODO: still race somewhere, not sending exit-status
 	defer s.Close()
 	defer s.client.Close()
 	defer s.session.Close()
 
-	logDone := make(chan bool, 1)
-	go func() {
-		s.log.Start()
-		logDone <- true
-	}()
-	defer func() {
-		<-logDone
-	}()
+	go s.log.Start()
 
 	runner := s.session.Shell
 	if cmd != "" {
@@ -311,21 +315,30 @@ func (s *Session) doExec(cmd string) {
 
 	var exitStatus requests.ExitStatusMsg
 	if err == nil {
-		s.SendRequest("exit-status", false, ssh.Marshal(exitStatus))
+		_, err := s.SendRequest("exit-status", false, ssh.Marshal(exitStatus))
+		if err != nil {
+			s.Errorw("error sending exit-status", "err", err)
+		}
 		s.Infow("sent exit 0")
 	} else if _, ok := err.(*ssh.ExitMissingError); ok {
 		// ¯\_(ツ)_/¯
 		s.Warn("remote exited without status or signal")
 	} else if eerr, ok := err.(*ssh.ExitError); ok {
 		exitStatus.ExitStatus = uint32(eerr.ExitStatus())
-		s.SendRequest("exit-status", false, ssh.Marshal(exitStatus))
+		_, err := s.SendRequest("exit-status", false, ssh.Marshal(exitStatus))
+		if err != nil {
+			s.Errorw("error sending exit-status", "err", err)
+		}
 
 		if eerr.Signal() != "" {
 			var exitSignal requests.ExitSignalMsg
 			exitSignal.Error = eerr.Msg()
 			exitSignal.Signal = eerr.Signal()
 			exitSignal.Lang = eerr.Lang()
-			s.SendRequest("exit-signal", false, ssh.Marshal(exitSignal))
+			_, err := s.SendRequest("exit-signal", false, ssh.Marshal(exitSignal))
+			if err != nil {
+				s.Errorw("error sending exit-signal", "err", err)
+			}
 		}
 	}
 }
