@@ -13,6 +13,22 @@ type Server struct {
 	ListenAddr string   `yaml:"listen_addr"`
 }
 
+type Dst struct {
+	User string
+	Host string
+	Port uint16
+}
+
+type DstACL struct {
+	Dst   `yaml:",inline"`
+	Allow bool
+}
+
+type ACLConfig struct {
+	Sessions []DstACL
+	Forwards []DstACL
+}
+
 //noinspection GoStructTag
 type Child struct {
 	HostKey           string        `yaml:"host_key"`
@@ -20,6 +36,7 @@ type Child struct {
 	ConnectTimeout    time.Duration `yaml:"-"`
 	LogFolder         string        `yaml:"log_folder"`
 	CAKeys            string        `yaml:"ca_keys"`
+	ACL               ACLConfig
 }
 
 type Config struct {

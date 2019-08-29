@@ -39,8 +39,9 @@ func HandleTCP(ch ssh.NewChannel, tc *tcpConfig) {
 	}
 	defer c.Close()
 
-	tc.Info("dialing tcp")
-	conn, err := c.Dial("tcp", fmt.Sprintf("%s:%d", tc.dstHost, tc.dstPort))
+	dest := fmt.Sprintf("%s:%d", tc.dstHost, tc.dstPort)
+	tc.Info("dialing tcp", "dest", dest)
+	conn, err := c.Dial("tcp", dest)
 	if err != nil {
 		ch.Reject(ssh.ConnectionFailed, "")
 		c.Warnw("failed to dial tcp", "err", err)

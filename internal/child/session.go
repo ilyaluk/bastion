@@ -2,6 +2,7 @@ package child
 
 import (
 	"fmt"
+	"strconv"
 
 	"github.com/ilyaluk/bastion/internal/client"
 	"github.com/ilyaluk/bastion/internal/config"
@@ -21,19 +22,30 @@ type channelConfig struct {
 	errs       chan<- error
 	clientProv *client.Provider
 }
-type sessionConfig channelConfig
+
+type sessionConfig struct {
+	channelConfig
+	acl *ACLValidator
+}
+
+type clientOptions struct {
+	env            map[string]string
+	ptyRequested   bool
+	ptyPayload     requests.PTYRequestMsg
+	agentRequested bool
+	// following is set via env vars
+	envHost string
+	envUser string
+	envPort uint16
+}
 
 type Session struct {
 	*sessionConfig
 	ssh.Channel
 	reqs       <-chan *ssh.Request
 	clientReqs chan interface{}
-
-	env            map[string]string
-	ptyRequested   bool
-	ptyPayload     requests.PTYRequestMsg
-	agentRequested bool
-	started        bool
+	started    bool
+	clientOptions
 
 	client  *client.Client
 	session *client.Session
@@ -43,6 +55,7 @@ type Session struct {
 const (
 	NocauthUser = "NOCAUTH_USER"
 	NocauthHost = "NOCAUTH_HOST"
+	NocauthPort = "NOCAUTH_PORT"
 )
 
 type channelWriteCloser struct {
@@ -70,8 +83,11 @@ func HandleSession(ch ssh.NewChannel, sc *sessionConfig) {
 		Channel:       channel,
 		reqs:          reqs,
 		clientReqs:    make(chan interface{}),
-
-		env: make(map[string]string),
+		clientOptions: clientOptions{
+			env:     make(map[string]string),
+			envPort: 22,
+			envUser: sc.username,
+		},
 	}
 
 	s.handleReqs(s.reqs)
@@ -108,32 +124,35 @@ func (s *Session) handleReqs(in <-chan *ssh.Request) {
 			}
 		}
 
-		// validate if everything needed present
+		rejectRequest := func(req *ssh.Request, reason string) error {
+			if req.Type != "subsystem" {
+				err := req.Reply(true, nil)
+				if err != nil {
+					return err
+				}
+				s.writeErrClose(reason)
+			} else {
+				return req.Reply(false, nil)
+			}
+			return nil
+		}
+
+		// validate if everything needed present and ACL
 		switch req.Type {
 		case "shell", "exec", "subsystem":
-			_, ok := s.env[NocauthHost]
-			if !ok {
+			if s.envHost == "" {
 				s.Warn("don't have host")
-				if req.Type != "subsystem" {
-					req.Reply(true, nil)
-					msg := fmt.Sprintf("please specify host to connect to in %s environment variable", NocauthHost)
-					s.writeErrClose(msg)
-				} else {
-					req.Reply(false, nil)
-					continue
-				}
+				msg := fmt.Sprintf("please specify host to connect to in %s environment variable", NocauthHost)
+				rejectRequest(req, msg)
 			}
 			// pretty useless, client will disconnect without -A
 			if !s.agentRequested {
 				s.Warn("don't have agent")
-				if req.Type != "subsystem" {
-					req.Reply(true, nil)
-					s.writeErrClose("please enable agent forwarding")
-				} else {
-					req.Reply(false, nil)
-					continue
-				}
-
+				rejectRequest(req, "please enable agent forwarding")
+			}
+			if !s.acl.CheckSession(s.envUser, s.envHost, s.envPort) {
+				s.Warn("access denied")
+				rejectRequest(req, "access denied")
 			}
 		}
 
@@ -160,8 +179,23 @@ func (s *Session) handleReqs(in <-chan *ssh.Request) {
 				req.Reply(false, nil)
 				continue
 			}
-			s.env[tmp.Name] = tmp.Value
 			s.Infow("env request", "name", tmp.Name, "val", tmp.Value)
+			switch tmp.Name {
+			case NocauthHost:
+				s.envHost = tmp.Value
+			case NocauthUser:
+				s.envUser = tmp.Value
+			case NocauthPort:
+				port, err := strconv.Atoi(tmp.Value)
+				if err != nil {
+					s.Errorw("invalid port sent", "err", err)
+					req.Reply(false, nil)
+					continue
+				}
+				s.envPort = uint16(port)
+			default:
+				s.env[tmp.Name] = tmp.Value
+			}
 			req.Reply(true, nil)
 
 		case "auth-agent-req@openssh.com":
@@ -229,19 +263,16 @@ func (s *Session) handleReqs(in <-chan *ssh.Request) {
 func (s *Session) startClientSession(cmd string) error {
 	var err error
 
-	user := s.username
-	if user_, ok := s.env[NocauthUser]; ok {
-		user = user_
-	}
-
 	// TODO: validate host
-	host := s.env[NocauthHost]
+	host := s.envHost
+	user := s.envUser
+	port := s.envPort
 
 	s.Info("getting client")
 	c, err := s.clientProv.GetClient(&client.Config{
 		User:    user,
 		Host:    host,
-		Port:    22,
+		Port:    port,
 		Agent:   s.agent,
 		Timeout: s.conf.ConnectTimeout,
 		Log:     s.SugaredLogger,
@@ -309,6 +340,8 @@ func (s *Session) doExec(cmd string) {
 	s.Infow("spawning process", "cmd", cmd)
 
 	if err := runner(); err != nil {
+		// TODO: maybe do not expose full errors
+		s.writeErrClose(err.Error())
 		s.errs <- errors.Wrap(err, "error running process")
 		return
 	}

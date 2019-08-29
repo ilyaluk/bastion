@@ -21,6 +21,8 @@ type Server struct {
 	Conf config.Child
 	*zap.SugaredLogger
 
+	acl *ACLValidator
+
 	username       string
 	sessId         []byte
 	noMoreSessions bool
@@ -28,6 +30,11 @@ type Server struct {
 	agent          *ClientAgent
 	clientProvider *client.Provider
 	certChecker    *ssh.CertChecker
+}
+
+func NewServer(conf config.Child, log *zap.SugaredLogger) *Server {
+	acl := NewACLValidator(conf.ACL)
+	return &Server{Conf: conf, SugaredLogger: log, acl: acl}
 }
 
 type ClientAgent struct {
@@ -173,13 +180,16 @@ func (s *Server) handleClient(chans <-chan ssh.NewChannel, reqs <-chan *ssh.Requ
 				}
 
 				go HandleSession(ch, &sessionConfig{
-					SugaredLogger: s.SugaredLogger,
-					conf:          s.Conf,
-					errs:          errs,
-					agent:         s.agent,
-					username:      s.username,
-					sessId:        s.sessId,
-					clientProv:    s.clientProvider,
+					channelConfig: channelConfig{
+						SugaredLogger: s.SugaredLogger,
+						conf:          s.Conf,
+						errs:          errs,
+						agent:         s.agent,
+						username:      s.username,
+						sessId:        s.sessId,
+						clientProv:    s.clientProvider,
+					},
+					acl: s.acl,
 				})
 
 			case "direct-tcpip":
@@ -189,6 +199,12 @@ func (s *Server) handleClient(chans <-chan ssh.NewChannel, reqs <-chan *ssh.Requ
 					continue
 				}
 				s.Infow("tcpip request", "req", tcpForwardReq)
+
+				if !s.acl.CheckForward(s.username, tcpForwardReq.RAddr, uint16(tcpForwardReq.RPort)) {
+					s.Warnw("access denied")
+					errs <- ch.Reject(ssh.Prohibited, "")
+					continue
+				}
 
 				go HandleTCP(ch, &tcpConfig{
 					channelConfig: channelConfig{

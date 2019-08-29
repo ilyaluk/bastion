@@ -7,3 +7,10 @@ child:
   connect_timeout: 5
   log_folder: /tmp/logs
   ca_keys: ca.pub
+  acl:
+    forwards:
+      - port: 22
+        allow: false
+      - allow: true
+    sessions:
+      - allow: true

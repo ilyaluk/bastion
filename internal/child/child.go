@@ -37,10 +37,7 @@ func Run() (err error) {
 	}
 	defer nConn.Close()
 
-	server := Server{
-		Conf:          conf.Child,
-		SugaredLogger: log,
-	}
+	server := NewServer(conf.Child, log)
 	if err = server.ProcessConnection(nConn); err != nil {
 		log.Errorw("error while handling connection", "err", err)
 		return

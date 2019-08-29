@@ -1,6 +1,6 @@
 ☐ More useful logs
 ☐ Agent forwarding
-☐ ACLs: host to connect to/tcp forwarding
+☐ ACLs: user/host groups, change format?
 ☐ Decoupling
 ☐ Isolation
 ☐ Privilege drop
@@ -9,6 +9,8 @@
 ☐ Tests
 ☐ Log auth agent queries
 ☐ asciinema/other widespread log format
+☐ systemd instead of bastion-server
+☐ set params globally from session envs (timeouts, etc)
 
 
 No support at moment due to unnecessity, maybe sometime:
