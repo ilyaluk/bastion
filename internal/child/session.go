@@ -208,7 +208,7 @@ func (s *Session) handleReqs(in <-chan *ssh.Request) {
 		case "shell":
 			req.Reply(true, nil)
 			s.started = true
-			go s.startShell()
+			go s.doExec("")
 
 		case "exec":
 			var tmp ssh_types.ExecMsg
@@ -220,7 +220,7 @@ func (s *Session) handleReqs(in <-chan *ssh.Request) {
 				s.Infow("exec req", "cmd", tmp.Command)
 				req.Reply(true, nil)
 				s.started = true
-				go s.startExec(tmp.Command)
+				go s.doExec(tmp.Command)
 			}
 
 		case "subsystem":
@@ -385,12 +385,4 @@ func (s *Session) doExec(cmd string) {
 			}
 		}
 	}
-}
-
-func (s *Session) startShell() {
-	s.doExec("")
-}
-
-func (s *Session) startExec(cmd string) {
-	s.doExec(cmd)
 }

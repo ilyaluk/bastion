@@ -5,7 +5,6 @@ import (
 	"io/ioutil"
 	"net"
 	"os/user"
-	"sync/atomic"
 
 	"github.com/ilyaluk/bastion/internal/client"
 	"github.com/ilyaluk/bastion/internal/config"
@@ -13,7 +12,6 @@ import (
 	"github.com/pkg/errors"
 	"go.uber.org/zap"
 	"golang.org/x/crypto/ssh"
-	"golang.org/x/crypto/ssh/agent"
 )
 
 // Server implements SSH server that client connects to
@@ -35,39 +33,6 @@ type Server struct {
 func NewServer(conf config.Child, log *zap.SugaredLogger) *Server {
 	acl := NewACLValidator(conf.ACL)
 	return &Server{Conf: conf, SugaredLogger: log, acl: acl}
-}
-
-type ClientAgent struct {
-	*zap.SugaredLogger
-	sshConn *ssh.ServerConn
-	ch      ssh.Channel
-	refs    int32
-}
-
-func (ca *ClientAgent) Get() (am ssh.AuthMethod, err error) {
-	atomic.AddInt32(&ca.refs, 1)
-
-	ca.Info("opening auth-agent channel")
-	ch, reqs, err := ca.sshConn.OpenChannel("auth-agent@openssh.com", nil)
-	if err != nil {
-		return
-	}
-	ca.Info("opened auth-agent channel")
-	ca.ch = ch
-
-	// no requests here whatsoever
-	go ssh.DiscardRequests(reqs)
-
-	am = ssh.PublicKeysCallback(agent.NewClient(ch).Signers)
-	return
-}
-
-func (ca *ClientAgent) Close() {
-	new := atomic.AddInt32(&ca.refs, -1)
-	ca.Infow("decreased refs on client agent", "refs", new)
-	if new == 0 {
-		ca.ch.Close()
-	}
 }
 
 func (s *Server) readHostKey() (sign ssh.Signer, err error) {
