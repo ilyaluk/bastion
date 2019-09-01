@@ -9,7 +9,7 @@ import (
 
 	"github.com/ilyaluk/bastion/internal/client"
 	"github.com/ilyaluk/bastion/internal/config"
-	"github.com/ilyaluk/bastion/internal/requests"
+	"github.com/ilyaluk/bastion/internal/ssh_types"
 	"github.com/pkg/errors"
 	"go.uber.org/zap"
 	"golang.org/x/crypto/ssh"
@@ -193,7 +193,7 @@ func (s *Server) handleClient(chans <-chan ssh.NewChannel, reqs <-chan *ssh.Requ
 				})
 
 			case "direct-tcpip":
-				var tcpForwardReq requests.ChannelOpenDirectMsg
+				var tcpForwardReq ssh_types.ChannelOpenDirectMsg
 				if err := ssh.Unmarshal(ch.ExtraData(), &tcpForwardReq); err != nil {
 					errs <- errors.Wrap(err, "error parsing tcpip request")
 					continue

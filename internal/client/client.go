@@ -6,7 +6,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/ilyaluk/bastion/internal/requests"
+	"github.com/ilyaluk/bastion/internal/ssh_types"
 	"go.uber.org/zap"
 	"golang.org/x/crypto/ssh"
 )
@@ -31,7 +31,7 @@ type Client struct {
 
 type SessionConfig struct {
 	PTYRequested bool
-	PTYPayload   requests.PTYRequestMsg
+	PTYPayload   ssh_types.PTYRequestMsg
 	Requests     chan interface{}
 }
 
@@ -90,7 +90,7 @@ func (c *Client) NewSession(sc SessionConfig) (s *Session, err error) {
 
 	if sc.PTYRequested {
 		pty := sc.PTYPayload
-		ml, err := requests.ParseModelist(pty.Modelist)
+		ml, err := ssh_types.ParseModelist(pty.Modelist)
 		if err != nil {
 			return nil, err
 		}
@@ -144,11 +144,11 @@ func (c *Client) Close() {
 func (s *Session) handleReqs(ch <-chan interface{}) {
 	for r := range ch {
 		switch req := r.(type) {
-		case requests.PTYWindowChangeMsg:
+		case ssh_types.PTYWindowChangeMsg:
 			_ = s.WindowChange(int(req.Rows), int(req.Columns))
-		case requests.SignalMsg:
+		case ssh_types.SignalMsg:
 			_ = s.Signal(ssh.Signal(req.Signal))
-		case requests.EOWMsg:
+		case ssh_types.EOWMsg:
 			_, _ = s.SendRequest("eow@openssh.com", false, nil)
 		}
 	}

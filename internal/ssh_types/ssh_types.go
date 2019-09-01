@@ -1,4 +1,4 @@
-package requests
+package ssh_types
 
 import (
 	"encoding/binary"

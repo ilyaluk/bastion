@@ -7,7 +7,7 @@ import (
 	"github.com/ilyaluk/bastion/internal/client"
 	"github.com/ilyaluk/bastion/internal/config"
 	"github.com/ilyaluk/bastion/internal/logger"
-	"github.com/ilyaluk/bastion/internal/requests"
+	"github.com/ilyaluk/bastion/internal/ssh_types"
 	"github.com/pkg/errors"
 	"go.uber.org/zap"
 	"golang.org/x/crypto/ssh"
@@ -31,7 +31,7 @@ type sessionConfig struct {
 type clientOptions struct {
 	env            map[string]string
 	ptyRequested   bool
-	ptyPayload     requests.PTYRequestMsg
+	ptyPayload     ssh_types.PTYRequestMsg
 	agentRequested bool
 	// following is set via env vars
 	envHost string
@@ -96,7 +96,7 @@ func HandleSession(ch ssh.NewChannel, sc *sessionConfig) {
 func (s *Session) writeErrClose(msg string) {
 	// TODO: errors, full write
 	s.Write([]byte(msg + "\r\n"))
-	s.SendRequest("exit-status", false, ssh.Marshal(requests.ExitStatusMsg{1}))
+	s.SendRequest("exit-status", false, ssh.Marshal(ssh_types.ExitStatusMsg{1}))
 	s.Close()
 }
 
@@ -159,7 +159,7 @@ func (s *Session) handleReqs(in <-chan *ssh.Request) {
 		// process request
 		switch req.Type {
 		case "pty-req":
-			var tmp requests.PTYRequestMsg
+			var tmp ssh_types.PTYRequestMsg
 			err := ssh.Unmarshal(req.Payload, &tmp)
 			if err != nil {
 				s.Errorw("error parsing pty req", "err", err)
@@ -172,7 +172,7 @@ func (s *Session) handleReqs(in <-chan *ssh.Request) {
 			s.ptyPayload = tmp
 
 		case "env":
-			var tmp requests.SetenvRequest
+			var tmp ssh_types.SetenvRequest
 			err := ssh.Unmarshal(req.Payload, &tmp)
 			if err != nil {
 				s.Errorw("error parsing env req", "err", err)
@@ -211,7 +211,7 @@ func (s *Session) handleReqs(in <-chan *ssh.Request) {
 			go s.startShell()
 
 		case "exec":
-			var tmp requests.ExecMsg
+			var tmp ssh_types.ExecMsg
 			err := ssh.Unmarshal(req.Payload, &tmp)
 			if err != nil {
 				s.Errorw("error parsing exec req", "err", err)
@@ -228,7 +228,7 @@ func (s *Session) handleReqs(in <-chan *ssh.Request) {
 			fallthrough
 
 		case "window-change":
-			var changeMsg requests.PTYWindowChangeMsg
+			var changeMsg ssh_types.PTYWindowChangeMsg
 			err := ssh.Unmarshal(req.Payload, &changeMsg)
 			if err != nil {
 				s.Errorw("error parsing window change req", "err", err)
@@ -238,7 +238,7 @@ func (s *Session) handleReqs(in <-chan *ssh.Request) {
 			}
 
 		case "signal":
-			var sigMsg requests.SignalMsg
+			var sigMsg ssh_types.SignalMsg
 			err := ssh.Unmarshal(req.Payload, &sigMsg)
 			if err != nil {
 				s.Errorw("error parsing signal req", "err", err)
@@ -249,7 +249,7 @@ func (s *Session) handleReqs(in <-chan *ssh.Request) {
 			}
 
 		case "eow@openssh.com":
-			s.clientReqs <- requests.EOWMsg{}
+			s.clientReqs <- ssh_types.EOWMsg{}
 
 		default:
 			if req.WantReply {
@@ -349,7 +349,7 @@ func (s *Session) doExec(cmd string) {
 	err = s.session.Wait()
 	s.Infow("process exited", "cmd", cmd, "err", err)
 
-	var exitStatus requests.ExitStatusMsg
+	var exitStatus ssh_types.ExitStatusMsg
 	if err == nil {
 		_, err := s.SendRequest("exit-status", false, ssh.Marshal(exitStatus))
 		if err != nil {
@@ -367,7 +367,7 @@ func (s *Session) doExec(cmd string) {
 		}
 
 		if eerr.Signal() != "" {
-			var exitSignal requests.ExitSignalMsg
+			var exitSignal ssh_types.ExitSignalMsg
 			exitSignal.Error = eerr.Msg()
 			exitSignal.Signal = eerr.Signal()
 			exitSignal.Lang = eerr.Lang()
