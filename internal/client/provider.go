@@ -10,7 +10,7 @@ type Host struct {
 }
 
 type Provider struct {
-	sync.Mutex
+	sync.RWMutex
 	m map[Host]*Client
 }
 
@@ -20,25 +20,32 @@ func NewProvider() *Provider {
 	return &p
 }
 
+func (cp *Provider) get(key Host) (*Client, bool) {
+	cp.RLock()
+	c, ok := cp.m[key]
+	cp.RUnlock()
+	return c, ok
+}
+
+func (cp *Provider) store(key Host, val *Client) {
+	cp.Lock()
+	cp.m[key] = val
+	cp.Unlock()
+}
+
 // GetClient get client from cache or creates new one with config
 func (cp *Provider) GetClient(conf *Config) (*Client, error) {
 	host := Host{conf.User, conf.Host, conf.Port}
 
-	cp.Lock()
-	c, ok := cp.m[host]
-	cp.Unlock()
-	if ok {
+	if c, ok := cp.get(host); ok {
 		c.IncRefs()
 		return c, nil
 	}
 
-	// Slow operation, ssh dialing and stuff, hence unlock before
 	client, err := New(conf)
 	if err != nil {
 		return nil, err
 	}
-	cp.Lock()
-	cp.m[host] = client
-	cp.Unlock()
+	cp.store(host, client)
 	return client, nil
 }

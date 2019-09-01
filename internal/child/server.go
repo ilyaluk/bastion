@@ -5,7 +5,7 @@ import (
 	"io/ioutil"
 	"net"
 	"os/user"
-	"sync"
+	"sync/atomic"
 
 	"github.com/ilyaluk/bastion/internal/client"
 	"github.com/ilyaluk/bastion/internal/config"
@@ -16,7 +16,7 @@ import (
 	"golang.org/x/crypto/ssh/agent"
 )
 
-// Server implements SSH server that connects to user
+// Server implements SSH server that client connects to
 type Server struct {
 	Conf config.Child
 	*zap.SugaredLogger
@@ -41,15 +41,11 @@ type ClientAgent struct {
 	*zap.SugaredLogger
 	sshConn *ssh.ServerConn
 	ch      ssh.Channel
-	refs    int
-	refsMu  sync.Mutex
+	refs    int32
 }
 
 func (ca *ClientAgent) Get() (am ssh.AuthMethod, err error) {
-	ca.refsMu.Lock()
-	defer ca.refsMu.Unlock()
-
-	ca.refs++
+	atomic.AddInt32(&ca.refs, 1)
 
 	ca.Info("opening auth-agent channel")
 	ch, reqs, err := ca.sshConn.OpenChannel("auth-agent@openssh.com", nil)
@@ -59,7 +55,7 @@ func (ca *ClientAgent) Get() (am ssh.AuthMethod, err error) {
 	ca.Info("opened auth-agent channel")
 	ca.ch = ch
 
-	// probably no requests here whatsoever
+	// no requests here whatsoever
 	go ssh.DiscardRequests(reqs)
 
 	am = ssh.PublicKeysCallback(agent.NewClient(ch).Signers)
@@ -67,12 +63,9 @@ func (ca *ClientAgent) Get() (am ssh.AuthMethod, err error) {
 }
 
 func (ca *ClientAgent) Close() {
-	ca.refsMu.Lock()
-	defer ca.refsMu.Unlock()
-
-	ca.refs--
-	ca.Infow("decreased refs on client agent", "refs", ca.refs)
-	if ca.refs == 0 {
+	new := atomic.AddInt32(&ca.refs, -1)
+	ca.Infow("decreased refs on client agent", "refs", new)
+	if new == 0 {
 		ca.ch.Close()
 	}
 }

@@ -19,7 +19,6 @@ type tcpConfig struct {
 }
 
 func HandleTCP(ch ssh.NewChannel, tc *tcpConfig) {
-	// TODO: ACL
 	// TODO: validate host
 
 	tc.Info("getting ssh client")

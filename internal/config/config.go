@@ -32,7 +32,7 @@ type ACLConfig struct {
 //noinspection GoStructTag
 type Child struct {
 	HostKey           string        `yaml:"host_key"`
-	ConnectTimeoutInt uint          `yaml:"connect_timeout"`
+	ConnectTimeoutSec uint          `yaml:"connect_timeout"`
 	ConnectTimeout    time.Duration `yaml:"-"`
 	LogFolder         string        `yaml:"log_folder"`
 	CAKeys            string        `yaml:"ca_keys"`
@@ -54,6 +54,6 @@ func Read(fname string) (c *Config, err error) {
 	if err = yaml.Unmarshal(data, c); err != nil {
 		return
 	}
-	c.Child.ConnectTimeout = time.Second * time.Duration(c.Child.ConnectTimeoutInt)
+	c.Child.ConnectTimeout = time.Second * time.Duration(c.Child.ConnectTimeoutSec)
 	return
 }

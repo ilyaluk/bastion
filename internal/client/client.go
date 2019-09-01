@@ -3,7 +3,7 @@ package client
 import (
 	"fmt"
 	"io"
-	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/ilyaluk/bastion/internal/ssh_types"
@@ -25,8 +25,7 @@ type Client struct {
 	*zap.SugaredLogger
 	*ssh.Client
 
-	refs   int
-	refsMu sync.Mutex
+	refs int32
 }
 
 type SessionConfig struct {
@@ -124,19 +123,13 @@ func (c *Client) NewSession(sc SessionConfig) (s *Session, err error) {
 }
 
 func (c *Client) IncRefs() {
-	c.refsMu.Lock()
-	defer c.refsMu.Unlock()
-
-	c.refs++
+	atomic.AddInt32(&c.refs, 1)
 }
 
 func (c *Client) Close() {
-	c.refsMu.Lock()
-	defer c.refsMu.Unlock()
-
-	c.refs--
-	c.Infow("decreased refs on client agent", "refs", c.refs)
-	if c.refs == 0 {
+	new := atomic.AddInt32(&c.refs, -1)
+	c.Infow("decreased refs on client agent", "refs", new)
+	if new == 0 {
 		c.Client.Close()
 	}
 }
