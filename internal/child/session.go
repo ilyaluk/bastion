@@ -49,7 +49,7 @@ type Session struct {
 
 	client  *client.Client
 	session *client.Session
-	log     *logger.SessionLogger
+	log     logger.SessionLogger
 }
 
 const (
@@ -294,7 +294,7 @@ func (s *Session) startClientSession(cmd string) error {
 	s.session = sess
 
 	s.Info("creating logger")
-	s.log = &logger.SessionLogger{
+	s.log = logger.SessionLogger{
 		Logger: logger.Logger{
 			ClientIn:   s.Channel,
 			ClientOut:  channelWriteCloser{s.Channel},
@@ -327,7 +327,15 @@ func (s *Session) doExec(cmd string) {
 	defer s.client.Close()
 	defer s.session.Close()
 
-	go s.log.Start()
+	go func() {
+		err := logger.StartSessionLog(s.log, s.conf.LogFormat)
+		if err != nil {
+			s.Errorw("session logger returned", "err", err)
+		} else {
+			s.Info("session logger exited")
+		}
+		s.Close()
+	}()
 
 	runner := s.session.Shell
 	if cmd != "" {

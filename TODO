@@ -8,7 +8,6 @@
 ☐ Compress sudoreplay logs
 ☐ Tests
 ☐ Log auth agent queries
-☐ asciinema/other widespread log format
 ☐ systemd instead of bastion-server
 ☐ set params globally from session envs (timeouts, etc)
 ☐ deb package

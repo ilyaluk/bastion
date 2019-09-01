@@ -34,6 +34,7 @@ type Child struct {
 	HostKey           string        `yaml:"host_key"`
 	ConnectTimeoutSec uint          `yaml:"connect_timeout"`
 	ConnectTimeout    time.Duration `yaml:"-"`
+	LogFormat         string        `yaml:"log_format"`
 	LogFolder         string        `yaml:"log_folder"`
 	CAKeys            string        `yaml:"ca_keys"`
 	ACL               ACLConfig
