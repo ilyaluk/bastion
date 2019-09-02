@@ -13,14 +13,10 @@ type Server struct {
 	ListenAddr string   `yaml:"listen_addr"`
 }
 
-type Dst struct {
-	User string
-	Host string
-	Port uint16
-}
-
 type DstACL struct {
-	Dst   `yaml:",inline"`
+	User  string
+	Host  string
+	Port  uint16
 	Allow bool
 }
 
