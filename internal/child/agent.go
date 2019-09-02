@@ -12,30 +12,36 @@ type ClientAgent struct {
 	*zap.SugaredLogger
 	sshConn *ssh.ServerConn
 	ch      ssh.Channel
+	auth    ssh.AuthMethod
 	refs    int32
 }
 
 func (ca *ClientAgent) Get() (am ssh.AuthMethod, err error) {
-	atomic.AddInt32(&ca.refs, 1)
+	newRefs := atomic.AddInt32(&ca.refs, 1)
+	ca.Debugw("opening client agent", "newRefs", newRefs)
 
-	ca.Info("opening auth-agent channel")
+	if newRefs > 1 {
+		return ca.auth, nil
+	}
+
+	ca.Debug("opening auth-agent channel")
 	ch, reqs, err := ca.sshConn.OpenChannel("auth-agent@openssh.com", nil)
 	if err != nil {
 		return
 	}
-	ca.Info("opened auth-agent channel")
+	ca.Debug("opened auth-agent channel")
 	ca.ch = ch
 
 	// no requests here whatsoever
 	go ssh.DiscardRequests(reqs)
 
-	am = ssh.PublicKeysCallback(agent.NewClient(ch).Signers)
-	return
+	ca.auth = ssh.PublicKeysCallback(agent.NewClient(ch).Signers)
+	return ca.auth, nil
 }
 
 func (ca *ClientAgent) Close() {
 	newRefs := atomic.AddInt32(&ca.refs, -1)
-	ca.Infow("decreased refs on client agent", "refs", newRefs)
+	ca.Debugw("closed client agent", "newRefs", newRefs)
 	if newRefs == 0 {
 		ca.ch.Close()
 	}

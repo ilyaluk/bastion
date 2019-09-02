@@ -21,7 +21,7 @@ type tcpConfig struct {
 func HandleTCP(ch ssh.NewChannel, tc *tcpConfig) {
 	// TODO: validate host
 
-	tc.Info("getting ssh client")
+	tc.Debug("getting client")
 	c, err := tc.clientProv.GetClient(&client.Config{
 		// TODO: read user from some session env?
 		User:    tc.username,
@@ -32,8 +32,9 @@ func HandleTCP(ch ssh.NewChannel, tc *tcpConfig) {
 		Log:     tc.SugaredLogger,
 	})
 	if err != nil {
-		ch.Reject(ssh.ConnectionFailed, "")
-		tc.Warnw("failed to create client for tcp", "err", err)
+		// TODO: do not expose full error?
+		tc.errs <- ch.Reject(ssh.ConnectionFailed, err.Error())
+		tc.errs <- err
 		return
 	}
 	defer c.Close()
@@ -42,8 +43,8 @@ func HandleTCP(ch ssh.NewChannel, tc *tcpConfig) {
 	tc.Info("dialing tcp", "dest", dest)
 	conn, err := c.Dial("tcp", dest)
 	if err != nil {
-		ch.Reject(ssh.ConnectionFailed, "")
-		c.Warnw("failed to dial tcp", "err", err)
+		tc.errs <- ch.Reject(ssh.ConnectionFailed, err.Error())
+		tc.errs <- err
 		return
 	}
 	defer conn.Close()

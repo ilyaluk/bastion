@@ -71,7 +71,7 @@ func (s *Server) authCallback(sc ssh.ConnMetadata, pubKey ssh.PublicKey) (*ssh.P
 		certFp := ssh.FingerprintSHA256(clientCert.SignatureKey)
 		perms, err := s.certChecker.Authenticate(sc, pubKey)
 		if err != nil {
-			s.Infow("client offered invalid certificate or error while checking it",
+			s.Infow("client offered invalid certificate",
 				"err", err,
 				"user", sc.User(),
 				"pubkey-fp", keyFp,
@@ -129,13 +129,14 @@ func (s *Server) handleClient(chans <-chan ssh.NewChannel, reqs <-chan *ssh.Requ
 				chans = nil
 				continue
 			}
-			s.Infow("new channel request", "type", ch.ChannelType())
+			s.Debugw("new channel request", "type", ch.ChannelType())
 			switch ch.ChannelType() {
 			case "session":
 				if s.noMoreSessions {
 					errs <- ch.Reject(ssh.Prohibited, "no-more-sessions was sent")
 					continue
 				}
+				s.Infow("session request")
 
 				go HandleSession(ch, &sessionConfig{
 					channelConfig: channelConfig{
@@ -160,7 +161,7 @@ func (s *Server) handleClient(chans <-chan ssh.NewChannel, reqs <-chan *ssh.Requ
 
 				if !s.acl.CheckForward(s.username, tcpForwardReq.RAddr, uint16(tcpForwardReq.RPort)) {
 					s.Warnw("access denied")
-					errs <- ch.Reject(ssh.Prohibited, "")
+					errs <- ch.Reject(ssh.Prohibited, "access denied")
 					continue
 				}
 
@@ -191,11 +192,10 @@ func (s *Server) handleClient(chans <-chan ssh.NewChannel, reqs <-chan *ssh.Requ
 				reqs = nil
 				continue
 			}
-			s.Infow("global request", "req", req)
+			s.Debugw("global request", "req", req)
 			switch req.Type {
 			case "keepalive@openssh.com":
 				errs <- req.Reply(true, nil)
-			// TODO: check for race condition here
 			case "no-more-sessions@openssh.com":
 				s.noMoreSessions = true
 			default:
@@ -263,8 +263,12 @@ func (s *Server) ProcessConnection(nConn net.Conn) (err error) {
 
 	for err := range errs {
 		if err != nil {
-			s.Errorw("error in channel", "err", err)
-			return err
+			if _, ok := err.(CriticalError); ok {
+				s.Errorw("critical error in channel", "err", err)
+				return err
+			}
+			// TODO: write to client?
+			s.Warnw("non-critical error in channel", "err", err)
 		}
 	}
 	s.Info("connection closed")

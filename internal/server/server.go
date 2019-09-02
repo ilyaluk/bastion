@@ -40,7 +40,11 @@ func (s *Server) handleConn(nConn net.Conn) {
 	}
 	file.Close()
 	if err := cmd.Wait(); err != nil {
-		s.Errorw("error while running child", "err", err)
+		if eerr, ok := err.(*exec.ExitError); ok {
+			s.Infow("child exited", "exitCode", eerr.ExitCode())
+		} else {
+			s.Errorw("error while running child", "err", err)
+		}
 	}
 }
 

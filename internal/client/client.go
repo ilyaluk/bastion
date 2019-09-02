@@ -68,12 +68,13 @@ func New(conf *Config) (c *Client, err error) {
 		refs:          1,
 	}
 
-	c.Info("connecting to remote")
-	client, err := ssh.Dial("tcp", fmt.Sprintf("%s:22", conf.Host), config)
+	dst := fmt.Sprintf("%s:%d", conf.Host, conf.Port)
+	c.Infow("connecting to remote", "dst", dst)
+	client, err := ssh.Dial("tcp", dst, config)
 	if err != nil {
 		return
 	}
-	c.Info("connected to remote, closing agent")
+	c.Debug("connected to remote, closing agent")
 	conf.Agent.Close()
 
 	c.Client = client
@@ -85,7 +86,7 @@ func (c *Client) NewSession(sc SessionConfig) (s *Session, err error) {
 	if err != nil {
 		return
 	}
-	c.Info("session allocated")
+	c.Debug("session allocated")
 
 	if sc.PTYRequested {
 		pty := sc.PTYPayload
@@ -128,7 +129,7 @@ func (c *Client) IncRefs() {
 
 func (c *Client) Close() {
 	newRefs := atomic.AddInt32(&c.refs, -1)
-	c.Infow("decreased refs on client agent", "refs", newRefs)
+	c.Debugw("decreased refs on client agent", "refs", newRefs)
 	if newRefs == 0 {
 		c.Client.Close()
 	}
