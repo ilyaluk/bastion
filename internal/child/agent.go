@@ -34,9 +34,9 @@ func (ca *ClientAgent) Get() (am ssh.AuthMethod, err error) {
 }
 
 func (ca *ClientAgent) Close() {
-	new := atomic.AddInt32(&ca.refs, -1)
-	ca.Infow("decreased refs on client agent", "refs", new)
-	if new == 0 {
+	newRefs := atomic.AddInt32(&ca.refs, -1)
+	ca.Infow("decreased refs on client agent", "refs", newRefs)
+	if newRefs == 0 {
 		ca.ch.Close()
 	}
 }

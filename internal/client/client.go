@@ -127,9 +127,9 @@ func (c *Client) IncRefs() {
 }
 
 func (c *Client) Close() {
-	new := atomic.AddInt32(&c.refs, -1)
-	c.Infow("decreased refs on client agent", "refs", new)
-	if new == 0 {
+	newRefs := atomic.AddInt32(&c.refs, -1)
+	c.Infow("decreased refs on client agent", "refs", newRefs)
+	if newRefs == 0 {
 		c.Client.Close()
 	}
 }
