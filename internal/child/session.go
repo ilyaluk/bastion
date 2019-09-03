@@ -186,6 +186,10 @@ func (s *Session) handleReqs(in <-chan *ssh.Request) {
 				s.errs <- err
 				continue
 			}
+			// TODO: remove after golang.org/cl/190777
+			if req.WantReply {
+				s.errs <- req.Reply(true, nil)
+			}
 			s.Debugw("env request", "name", tmp.Name, "val", tmp.Value)
 			switch tmp.Name {
 			case NocauthHost:
