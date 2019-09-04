@@ -3,6 +3,7 @@ package logger
 import (
 	"encoding/json"
 	"os"
+	"path/filepath"
 	"time"
 )
 
@@ -55,6 +56,12 @@ func (w asciicastWriter) Close() error {
 
 func (l *AsciicastLogger) Start() (err error) {
 	now := time.Now()
+
+	dir, _ := filepath.Split(l.folder())
+	err = os.MkdirAll(dir, 0700)
+	if err != nil {
+		return
+	}
 
 	f, err := os.Create(l.folder())
 	if err != nil {
