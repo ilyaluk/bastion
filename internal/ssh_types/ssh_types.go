@@ -65,6 +65,13 @@ type ChannelOpenDirectMsg struct {
 	LPort uint32
 }
 
+// https://github.com/openssh/openssh-portable/blob/a46ac4d86b25414d78b632e8173578b37e5f8a83/PROTOCOL#L245
+type ChannelOpenDirectUDSMsg struct {
+	RAddr string
+	LAddr string
+	LPort uint32
+}
+
 // RFC 4254 Section 8
 func ParseModelist(data []byte) (res map[uint8]uint32, err error) {
 	res = make(map[uint8]uint32)

@@ -5,6 +5,7 @@ import (
 	"io/ioutil"
 	"net"
 	"os/user"
+	"strings"
 
 	"github.com/ilyaluk/bastion/internal/client"
 	"github.com/ilyaluk/bastion/internal/config"
@@ -151,12 +152,28 @@ func (s *Server) handleClient(chans <-chan ssh.NewChannel, reqs <-chan *ssh.Requ
 					acl: s.acl,
 				})
 
-			case "direct-tcpip":
+			case "direct-tcpip", "direct-streamlocal@openssh.com":
 				var tcpForwardReq ssh_types.ChannelOpenDirectMsg
-				if err := ssh.Unmarshal(ch.ExtraData(), &tcpForwardReq); err != nil {
-					errs <- errors.Wrap(err, "error parsing tcpip request")
-					continue
+				if ch.ChannelType() == "direct-streamlocal@openssh.com" {
+					var udsForwardReq ssh_types.ChannelOpenDirectUDSMsg
+					if err := ssh.Unmarshal(ch.ExtraData(), &udsForwardReq); err != nil {
+						errs <- errors.Wrap(err, "error parsing uds request")
+						continue
+					}
+					if strings.Index(udsForwardReq.RAddr, "/tmp/.fwd/localhost/") == 0 {
+						tcpForwardReq.LAddr = udsForwardReq.LAddr
+						tcpForwardReq.LPort = udsForwardReq.LPort
+					} else {
+						errs <- ch.Reject(ssh.Prohibited, fmt.Sprintf("UDS not yet supported"))
+						continue
+					}
+				} else {
+					if err := ssh.Unmarshal(ch.ExtraData(), &tcpForwardReq); err != nil {
+						errs <- errors.Wrap(err, "error parsing tcpip request")
+						continue
+					}
 				}
+
 				s.Infow("tcpip request", "req", tcpForwardReq)
 
 				if !s.acl.CheckForward(s.username, tcpForwardReq.RAddr, uint16(tcpForwardReq.RPort)) {
