@@ -1,4 +1,4 @@
-package child
+package bastion
 
 import (
 	"fmt"
@@ -8,7 +8,6 @@ import (
 	"strings"
 
 	"github.com/ilyaluk/bastion/internal/client"
-	"github.com/ilyaluk/bastion/internal/config"
 	"github.com/ilyaluk/bastion/internal/ssh_types"
 	"github.com/pkg/errors"
 	"go.uber.org/zap"
@@ -17,7 +16,7 @@ import (
 
 // Server implements SSH server that client connects to
 type Server struct {
-	Conf config.Child
+	Conf Config
 	*zap.SugaredLogger
 
 	sshConn  *ssh.ServerConn
@@ -36,7 +35,7 @@ type GlobalUserOptions struct {
 	noMoreSessions bool
 }
 
-func NewServer(conf config.Child, log *zap.SugaredLogger) *Server {
+func NewServer(conf Config, log *zap.SugaredLogger) *Server {
 	acl := NewACLValidator(conf.ACL)
 	return &Server{Conf: conf, SugaredLogger: log, acl: acl}
 }

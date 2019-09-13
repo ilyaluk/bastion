@@ -1,4 +1,4 @@
-package child
+package bastion
 
 import (
 	"testing"

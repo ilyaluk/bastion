@@ -1,4 +1,4 @@
-package config
+package bastion
 
 import (
 	"io/ioutil"
@@ -6,12 +6,6 @@ import (
 
 	"gopkg.in/yaml.v2"
 )
-
-type Server struct {
-	ChildCmd   string   `yaml:"child_cmd"`
-	ChildArgs  []string `yaml:"child_args"`
-	ListenAddr string   `yaml:"listen_addr"`
-}
 
 type DstACL struct {
 	User  string
@@ -26,7 +20,7 @@ type ACLConfig struct {
 }
 
 //noinspection GoStructTag
-type Child struct {
+type Config struct {
 	HostKey           string        `yaml:"host_key"`
 	ConnectTimeoutSec uint          `yaml:"connect_timeout"`
 	ConnectTimeout    time.Duration `yaml:"-"`
@@ -36,21 +30,15 @@ type Child struct {
 	ACL               ACLConfig
 }
 
-type Config struct {
-	Server Server
-	Child  Child
-}
-
-func Read(fname string) (c *Config, err error) {
+func ReadConfig(fname string) (c Config, err error) {
 	data, err := ioutil.ReadFile(fname)
 	if err != nil {
 		return
 	}
 
-	c = new(Config)
-	if err = yaml.Unmarshal(data, c); err != nil {
+	if err = yaml.Unmarshal(data, &c); err != nil {
 		return
 	}
-	c.Child.ConnectTimeout = time.Second * time.Duration(c.Child.ConnectTimeoutSec)
+	c.ConnectTimeout = time.Second * time.Duration(c.ConnectTimeoutSec)
 	return
 }

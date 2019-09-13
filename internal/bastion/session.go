@@ -1,11 +1,10 @@
-package child
+package bastion
 
 import (
 	"fmt"
 	"strconv"
 
 	"github.com/ilyaluk/bastion/internal/client"
-	"github.com/ilyaluk/bastion/internal/config"
 	"github.com/ilyaluk/bastion/internal/logger"
 	"github.com/ilyaluk/bastion/internal/ssh_types"
 	"github.com/pkg/errors"
@@ -14,7 +13,7 @@ import (
 )
 
 type channelConfig struct {
-	conf config.Child
+	conf Config
 	*zap.SugaredLogger
 	username   string
 	sessId     []byte

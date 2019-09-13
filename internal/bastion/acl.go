@@ -1,16 +1,14 @@
-package child
-
-import "github.com/ilyaluk/bastion/internal/config"
+package bastion
 
 type ACLValidator struct {
-	config.ACLConfig
+	ACLConfig
 }
 
-func NewACLValidator(conf config.ACLConfig) *ACLValidator {
+func NewACLValidator(conf ACLConfig) *ACLValidator {
 	return &ACLValidator{ACLConfig: conf}
 }
 
-func checkACL(user, host string, port uint16, acls []config.DstACL) bool {
+func checkACL(user, host string, port uint16, acls []DstACL) bool {
 	for _, acl := range acls {
 		if (acl.User == "" || acl.User == user) &&
 			(acl.Host == "" || acl.Host == host) &&

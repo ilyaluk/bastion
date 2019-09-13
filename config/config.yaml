@@ -1,0 +1,12 @@
+host_key: ./id_rsa
+connect_timeout: 5
+log_folder: /tmp/logs
+log_format: asciicast
+ca_keys: ca.pub
+acl:
+  forwards:
+    - port: 22
+      allow: false
+    - allow: true
+  sessions:
+    - allow: true

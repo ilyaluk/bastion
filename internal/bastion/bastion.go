@@ -1,11 +1,10 @@
-package child
+package bastion
 
 import (
 	"net"
 	"os"
 	"time"
 
-	"github.com/ilyaluk/bastion/internal/config"
 	"github.com/pkg/errors"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
@@ -79,11 +78,11 @@ func Run() (err error) {
 		inetdStyle = true
 	}
 
-	conf, err := config.Read(os.Args[1])
+	conf, err := ReadConfig(os.Args[1])
 	if err != nil {
 		return
 	}
-	log.Infow("loaded config", "conf", conf.Child)
+	log.Infow("loaded config", "conf", conf)
 
 	var clientConn net.Conn
 	if inetdStyle {
@@ -96,7 +95,7 @@ func Run() (err error) {
 		defer clientConn.Close()
 	}
 
-	server := NewServer(conf.Child, log)
+	server := NewServer(conf, log)
 	if err = server.ProcessConnection(clientConn); err != nil {
 		log.Errorw("error while handling connection", "err", err)
 		return

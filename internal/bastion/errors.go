@@ -1,4 +1,4 @@
-package child
+package bastion
 
 // TODO: check if this is needed
 // CriticalError represents critical bastion child error

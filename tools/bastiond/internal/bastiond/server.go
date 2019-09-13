@@ -1,17 +1,24 @@
-package server
+package bastiond
 
 import (
+	"io/ioutil"
 	"net"
 	"os"
 	"os/exec"
 
-	"github.com/ilyaluk/bastion/internal/config"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
+	"gopkg.in/yaml.v2"
 )
 
+type Config struct {
+	ChildCmd   string   `yaml:"child_cmd"`
+	ChildArgs  []string `yaml:"child_args"`
+	ListenAddr string   `yaml:"listen_addr"`
+}
+
 type Server struct {
-	Conf config.Server
+	Config
 	*zap.SugaredLogger
 }
 
@@ -28,7 +35,7 @@ func copyToFile(conn net.Conn) *os.File {
 }
 
 func (s *Server) handleConn(nConn net.Conn) {
-	cmd := exec.Command(s.Conf.ChildCmd, s.Conf.ChildArgs...)
+	cmd := exec.Command(s.ChildCmd, s.ChildArgs...)
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
@@ -49,7 +56,7 @@ func (s *Server) handleConn(nConn net.Conn) {
 }
 
 func (s *Server) start() (err error) {
-	sock, err := net.Listen("tcp", s.Conf.ListenAddr)
+	sock, err := net.Listen("tcp", s.ListenAddr)
 	if err != nil {
 		return
 	}
@@ -80,14 +87,19 @@ func Run() (err error) {
 		log.Fatalf("usage: %s config.yaml", os.Args[0])
 	}
 
-	conf, err := config.Read(os.Args[1])
+	data, err := ioutil.ReadFile(os.Args[1])
 	if err != nil {
 		return
 	}
-	log.Infow("loaded config", "conf", conf.Server)
+
+	var conf Config
+	if err = yaml.Unmarshal(data, &conf); err != nil {
+		return
+	}
+	log.Infow("loaded config", "conf", conf)
 
 	server := Server{
-		Conf:          conf.Server,
+		Config:        conf,
 		SugaredLogger: log,
 	}
 	return server.start()
