@@ -20,15 +20,20 @@ type Server struct {
 	Conf config.Child
 	*zap.SugaredLogger
 
-	acl *ACLValidator
-
-	username       string
-	sessId         []byte
-	noMoreSessions bool
-	sshConn        *ssh.ServerConn
-	agent          *ClientAgent
+	sshConn  *ssh.ServerConn
+	sessId   []byte
+	username string
+	agent    *ClientAgent
+	GlobalUserOptions
 	clientProvider *client.Provider
 	certChecker    *ssh.CertChecker
+	acl            *ACLValidator
+}
+
+type GlobalUserOptions struct {
+	envUsername    string
+	lastRemote     string
+	noMoreSessions bool
 }
 
 func NewServer(conf config.Child, log *zap.SugaredLogger) *Server {
@@ -198,7 +203,7 @@ func (s *Server) handleClient(chans <-chan ssh.NewChannel, reqs <-chan *ssh.Requ
 					dstPort: uint16(tcpForwardReq.RPort),
 				})
 
-			case "x11", "forwarded-tcpip", "tun@openssh.com", "direct-streamlocal@openssh.com", "forwarded-streamlocal@openssh.com":
+			case "x11", "forwarded-tcpip", "tun@openssh.com", "forwarded-streamlocal@openssh.com":
 				errs <- ch.Reject(ssh.Prohibited, fmt.Sprintf("using %s is prohibited", ch.ChannelType()))
 			default:
 				errs <- ch.Reject(ssh.UnknownChannelType, "unknown channel type")

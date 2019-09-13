@@ -28,7 +28,7 @@ type sessionConfig struct {
 	acl *ACLValidator
 }
 
-type clientOptions struct {
+type sessionUserOptions struct {
 	env            map[string]string
 	ptyRequested   bool
 	ptyPayload     ssh_types.PTYRequestMsg
@@ -45,7 +45,8 @@ type Session struct {
 	reqs       <-chan *ssh.Request
 	clientReqs chan interface{}
 	started    bool
-	clientOptions
+	GlobalUserOptions
+	sessionUserOptions
 
 	client  *client.Client
 	session *client.Session
@@ -82,7 +83,7 @@ func HandleSession(ch ssh.NewChannel, sc *sessionConfig) {
 		Channel:       channel,
 		reqs:          reqs,
 		clientReqs:    make(chan interface{}),
-		clientOptions: clientOptions{
+		sessionUserOptions: sessionUserOptions{
 			env:     make(map[string]string),
 			envPort: 22,
 			envUser: sc.username,
