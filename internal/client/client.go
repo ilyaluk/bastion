@@ -3,7 +3,6 @@ package client
 import (
 	"fmt"
 	"io"
-	"sync/atomic"
 	"time"
 
 	"github.com/ilyaluk/bastion/internal/ssh_types"
@@ -12,20 +11,17 @@ import (
 )
 
 type Config struct {
+	*zap.SugaredLogger
 	User    string
 	Host    string
 	Port    uint16
-	Agent   ExtAgent
+	Auth    ssh.AuthMethod
 	Timeout time.Duration
-	Log     *zap.SugaredLogger
 }
 
 type Client struct {
 	*Config
-	*zap.SugaredLogger
 	*ssh.Client
-
-	refs int32
 }
 
 type SessionConfig struct {
@@ -42,30 +38,18 @@ type Session struct {
 	Stderr io.Reader
 }
 
-type ExtAgent interface {
-	Get() (am ssh.AuthMethod, err error)
-	Close()
-}
-
 func New(conf *Config) (c *Client, err error) {
-	agent, err := conf.Agent.Get()
-	if err != nil {
-		return
-	}
-
 	config := &ssh.ClientConfig{
 		User:            conf.User,
-		Auth:            []ssh.AuthMethod{agent},
-		HostKeyCallback: ssh.InsecureIgnoreHostKey(),
+		Auth:            []ssh.AuthMethod{conf.Auth},
+		HostKeyCallback: ssh.InsecureIgnoreHostKey(), // TODO
 		Timeout:         conf.Timeout,
 		BannerCallback:  ssh.BannerDisplayStderr(),
 		ClientVersion:   "SSH-2.0-OpenSSH_Go_Bastion",
 	}
 
 	c = &Client{
-		Config:        conf,
-		SugaredLogger: conf.Log,
-		refs:          1,
+		Config: conf,
 	}
 
 	dst := fmt.Sprintf("%s:%d", conf.Host, conf.Port)
@@ -74,8 +58,7 @@ func New(conf *Config) (c *Client, err error) {
 	if err != nil {
 		return
 	}
-	c.Debug("connected to remote, closing agent")
-	conf.Agent.Close()
+	c.Debug("connected to remote")
 
 	c.Client = client
 	return
@@ -121,18 +104,6 @@ func (c *Client) NewSession(sc SessionConfig) (s *Session, err error) {
 	}
 	go s.handleReqs(sc.Requests)
 	return s, nil
-}
-
-func (c *Client) IncRefs() {
-	atomic.AddInt32(&c.refs, 1)
-}
-
-func (c *Client) Close() {
-	newRefs := atomic.AddInt32(&c.refs, -1)
-	c.Debugw("decreased refs on client agent", "refs", newRefs)
-	if newRefs == 0 {
-		c.Client.Close()
-	}
 }
 
 func (s *Session) handleReqs(ch <-chan interface{}) {

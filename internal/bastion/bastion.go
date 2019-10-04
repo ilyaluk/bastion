@@ -3,61 +3,11 @@ package bastion
 import (
 	"net"
 	"os"
-	"time"
 
 	"github.com/pkg/errors"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 )
-
-type nilTCPAddr string
-
-func (n nilTCPAddr) Network() string {
-	return "tcp"
-}
-
-func (n nilTCPAddr) String() string {
-	return string(n)
-}
-
-type stdioNetConn struct{}
-
-func (s stdioNetConn) Read(b []byte) (n int, err error) {
-	return os.Stdin.Read(b)
-}
-
-func (s stdioNetConn) Write(b []byte) (n int, err error) {
-	return os.Stdout.Write(b)
-}
-
-func (s stdioNetConn) Close() error {
-	err1 := os.Stdin.Close()
-	err2 := os.Stdout.Close()
-	if err1 != nil || err2 != nil {
-		return errors.Errorf("error closing in: %v, out: %", err1, err2)
-	}
-	return nil
-}
-
-func (s stdioNetConn) LocalAddr() net.Addr {
-	return nilTCPAddr("stdin")
-}
-
-func (s stdioNetConn) RemoteAddr() net.Addr {
-	return nilTCPAddr("stdout")
-}
-
-func (s stdioNetConn) SetDeadline(t time.Time) error {
-	return nil
-}
-
-func (s stdioNetConn) SetReadDeadline(t time.Time) error {
-	return nil
-}
-
-func (s stdioNetConn) SetWriteDeadline(t time.Time) error {
-	return nil
-}
 
 func Run() (err error) {
 	logconfig := zap.NewDevelopmentConfig()

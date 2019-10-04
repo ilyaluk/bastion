@@ -12,19 +12,9 @@ import (
 	"golang.org/x/crypto/ssh"
 )
 
-type channelConfig struct {
-	conf Config
-	*zap.SugaredLogger
-	username   string
-	sessId     []byte
-	agent      *ClientAgent
-	errs       chan<- error
-	clientProv *client.Provider
-}
-
 type sessionConfig struct {
-	channelConfig
-	acl *ACLValidator
+	newCh ssh.NewChannel
+	serv  *Server
 }
 
 type sessionUserOptions struct {
@@ -32,22 +22,17 @@ type sessionUserOptions struct {
 	ptyRequested   bool
 	ptyPayload     ssh_types.PTYRequestMsg
 	agentRequested bool
-	// following is set via env vars
-	envHost string
-	envUser string
-	envPort uint16
 }
 
 type Session struct {
 	*sessionConfig
+	*zap.SugaredLogger
+	errs chan error
 	ssh.Channel
-	reqs       <-chan *ssh.Request
 	clientReqs chan interface{}
 	started    bool
-	GlobalUserOptions
 	sessionUserOptions
 
-	client  *client.Client
 	session *client.Session
 	log     logger.SessionLogger
 }
@@ -58,38 +43,25 @@ const (
 	NocauthPort = "NOCAUTH_PORT"
 )
 
-type channelWriteCloser struct {
-	c ssh.Channel
-}
-
-func (wc channelWriteCloser) Write(p []byte) (int, error) {
-	return wc.c.Write(p)
-}
-
-func (wc channelWriteCloser) Close() error {
-	return wc.c.CloseWrite()
-}
-
-func HandleSession(ch ssh.NewChannel, sc *sessionConfig) {
-	channel, reqs, err := ch.Accept()
+func HandleSession(sc *sessionConfig) {
+	channel, reqs, err := sc.newCh.Accept()
 	if err != nil {
-		sc.errs <- err
+		sc.serv.errs <- err
 		return
 	}
 
 	s := Session{
 		sessionConfig: sc,
+		SugaredLogger: sc.serv.SugaredLogger,
+		errs:          sc.serv.errs,
 		Channel:       channel,
-		reqs:          reqs,
 		clientReqs:    make(chan interface{}),
 		sessionUserOptions: sessionUserOptions{
-			env:     make(map[string]string),
-			envPort: 22,
-			envUser: sc.username,
+			env: make(map[string]string),
 		},
 	}
 
-	s.handleReqs(s.reqs)
+	s.handleReqs(reqs)
 }
 
 func (s *Session) writeInfo(msg string, args ...interface{}) error {
@@ -146,8 +118,8 @@ func (s *Session) handleReqs(in <-chan *ssh.Request) {
 		// validate if everything needed present and ACL
 		switch req.Type {
 		case "shell", "exec", "subsystem":
-			if s.envHost == "" {
-				s.Debug("user haven't specified host")
+			if s.serv.client == nil && s.serv.remoteHost == "" {
+				s.Debug("user haven't specified host yet")
 				msg := fmt.Sprintf("error: no host specified (set it in %s env var)", NocauthHost)
 				s.errs <- rejectRequest(req, msg)
 				continue
@@ -157,8 +129,8 @@ func (s *Session) handleReqs(in <-chan *ssh.Request) {
 				s.errs <- rejectRequest(req, "error: agent forwarding disabled (enable it with -A)")
 				continue
 			}
-			if !s.acl.CheckSession(s.envUser, s.envHost, s.envPort) {
-				s.Info("access denied", "user", s.envUser, "host", s.envHost, "port", s.envPort)
+			if !s.serv.acl.CheckSession(s.serv.remoteUser, s.serv.remoteHost, s.serv.remotePort) {
+				s.Info("access denied", "user", s.serv.remoteUser, "host", s.serv.remoteHost, "port", s.serv.remotePort)
 				s.errs <- rejectRequest(req, "error: access denied")
 				continue
 			}
@@ -193,16 +165,17 @@ func (s *Session) handleReqs(in <-chan *ssh.Request) {
 			s.Debugw("env request", "name", tmp.Name, "val", tmp.Value)
 			switch tmp.Name {
 			case NocauthHost:
-				s.envHost = tmp.Value
+				// TODO: do not overwrite?
+				s.serv.remoteHost = tmp.Value
 			case NocauthUser:
-				s.envUser = tmp.Value
+				s.serv.remoteUser = tmp.Value
 			case NocauthPort:
 				port, err := strconv.Atoi(tmp.Value)
 				if err != nil {
 					s.errs <- s.writeInfo("warning: invalid %s value", NocauthPort)
 					continue
 				}
-				s.envPort = uint16(port)
+				s.serv.remotePort = uint16(port)
 			default:
 				s.env[tmp.Name] = tmp.Value
 			}
@@ -275,26 +248,33 @@ func (s *Session) startClientSession(cmd string) error {
 	var err error
 
 	// TODO: validate host
-	host := s.envHost
-	user := s.envUser
-	port := s.envPort
+	user, host, port := s.serv.remoteUser, s.serv.remoteHost, s.serv.remotePort
 
-	s.Debug("getting client")
-	c, err := s.clientProv.GetClient(&client.Config{
-		User:    user,
-		Host:    host,
-		Port:    port,
-		Agent:   s.agent,
-		Timeout: s.conf.ConnectTimeout,
-		Log:     s.SugaredLogger,
-	})
-	if err != nil {
-		return errors.Wrap(err, "failed to create client")
+	// TODO: races here?
+	if s.serv.client == nil {
+		agent := s.serv.agent
+		auth, err := agent.GetAuth()
+		if err != nil {
+			return err
+		}
+
+		cli, err := client.New(&client.Config{
+			SugaredLogger: s.SugaredLogger,
+			User:          user,
+			Host:          host,
+			Port:          port,
+			Auth:          auth,
+			Timeout:       s.serv.Conf.ConnectTimeout,
+		})
+		if err != nil {
+			return NewCritical(err)
+		}
+		s.serv.client = cli
+		_ = agent.Close()
 	}
-	s.client = c
 
 	s.Debug("opening session")
-	sess, err := c.NewSession(client.SessionConfig{
+	sess, err := s.serv.client.NewSession(client.SessionConfig{
 		PTYRequested: s.ptyRequested,
 		PTYPayload:   s.ptyPayload,
 		Requests:     s.clientReqs,
@@ -313,8 +293,8 @@ func (s *Session) startClientSession(cmd string) error {
 			ServerOut:  sess.Stdout,
 			Username:   user,
 			Hostname:   host,
-			SessId:     s.sessId,
-			RootFolder: s.conf.LogFolder,
+			SessId:     s.serv.sessId,
+			RootFolder: s.serv.Conf.LogFolder,
 		},
 		ClientErr: s.Channel.Stderr(),
 		ServerErr: sess.Stderr,
@@ -334,15 +314,13 @@ func (s *Session) doExec(cmd string) {
 		s.errs <- err
 		return
 	}
-	// close user connection
+	// close user session
 	defer s.Close()
-	// decrease remote client refs
-	defer s.client.Close()
 	// close remote session
 	defer s.session.Close()
 
 	go func() {
-		err := logger.StartSessionLog(s.log, s.conf.LogFormat)
+		err := logger.StartSessionLog(s.log, s.serv.Conf.LogFormat)
 		if err != nil {
 			// TODO: pass return
 			s.Infow("session logger returned", "err", err)

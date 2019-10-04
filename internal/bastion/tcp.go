@@ -4,74 +4,64 @@ import (
 	"fmt"
 	"net"
 
-	"github.com/ilyaluk/bastion/internal/client"
 	"github.com/ilyaluk/bastion/internal/logger"
 	"github.com/pkg/errors"
 	"golang.org/x/crypto/ssh"
 )
 
 type tcpConfig struct {
-	channelConfig
+	newCh   ssh.NewChannel
+	serv    *Server
 	srcHost string
 	srcPort uint16
 	dstHost string
 	dstPort uint16
 }
 
-func HandleTCP(ch ssh.NewChannel, tc *tcpConfig) {
-	// TODO: validate host
+func HandleTCP(tc *tcpConfig) {
+	errs := tc.serv.errs
+	log := tc.serv.SugaredLogger
 
-	tc.Debug("getting client")
-	c, err := tc.clientProv.GetClient(&client.Config{
-		// TODO: read user from some session env?
-		User:    tc.username,
-		Host:    tc.dstHost,
-		Port:    22,
-		Agent:   tc.agent,
-		Timeout: tc.conf.ConnectTimeout,
-		Log:     tc.SugaredLogger,
-	})
-	if err != nil {
-		// TODO: do not expose full error?
-		tc.errs <- ch.Reject(ssh.ConnectionFailed, err.Error())
-		tc.errs <- err
+	if tc.serv.client == nil {
+		errs <- tc.newCh.Reject(ssh.ConnectionFailed, "have not connected to remote yet")
 		return
 	}
-	defer c.Close()
 
+	// TODO: validate host
 	dest := fmt.Sprintf("%s:%d", tc.dstHost, tc.dstPort)
-	tc.Info("dialing tcp", "dest", dest)
-	conn, err := c.Dial("tcp", dest)
+	log.Info("dialing tcp", "dest", dest)
+	conn, err := tc.serv.client.Dial("tcp", dest)
 	if err != nil {
-		tc.errs <- ch.Reject(ssh.ConnectionFailed, err.Error())
-		tc.errs <- err
+		// TODO: do not expose errors
+		errs <- tc.newCh.Reject(ssh.ConnectionFailed, err.Error())
+		errs <- err
 		return
 	}
 	defer conn.Close()
 
-	tc.Info("accepting request")
-	channel, reqs, err := ch.Accept()
+	log.Info("accepting request")
+	channel, reqs, err := tc.newCh.Accept()
 	if err != nil {
-		tc.errs <- errors.Wrap(err, "failed to accept channel")
+		errs <- errors.Wrap(err, "failed to accept channel")
 		return
 	}
-	tc.Info("accepted tcp channel")
+	log.Info("accepted tcp channel")
 
 	// no requests here
 	go ssh.DiscardRequests(reqs)
 
 	defer channel.Close()
 
-	log := logger.TCPLogger{
+	tcpLog := logger.TCPLogger{
 		Logger: logger.Logger{
 			ClientIn:   channel,
 			ClientOut:  channel,
 			ServerIn:   conn,
 			ServerOut:  conn,
-			Username:   tc.username,
+			Username:   tc.serv.remoteUser,
 			Hostname:   tc.dstHost,
-			SessId:     tc.sessId,
-			RootFolder: tc.conf.LogFolder,
+			SessId:     tc.serv.sessId,
+			RootFolder: tc.serv.Conf.LogFolder,
 		},
 		// TODO
 		Src:     net.IP{127, 0, 0, 1},
@@ -79,5 +69,7 @@ func HandleTCP(ch ssh.NewChannel, tc *tcpConfig) {
 		SrcPort: tc.srcPort,
 		DstPort: tc.dstPort,
 	}
-	log.Start()
+	if err = tcpLog.Start(); err != nil {
+		log.Errorw("error while writing TCP log", "err", err)
+	}
 }

@@ -2,10 +2,11 @@ package bastion
 
 import (
 	"fmt"
-	"io/ioutil"
 	"net"
 	"os/user"
+	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/ilyaluk/bastion/internal/client"
 	"github.com/ilyaluk/bastion/internal/ssh_types"
@@ -18,67 +19,47 @@ import (
 type Server struct {
 	Conf Config
 	*zap.SugaredLogger
+	acl *ACLValidator
 
-	sshConn  *ssh.ServerConn
-	sessId   []byte
-	username string
-	agent    *ClientAgent
-	GlobalUserOptions
-	clientProvider *client.Provider
-	certChecker    *ssh.CertChecker
-	acl            *ACLValidator
-}
+	sshConn     *ssh.ServerConn
+	sessId      []byte
+	remoteUser  string
+	remoteHost  string
+	remotePort  uint16
+	agent       *ClientAgent
+	certChecker *ssh.CertChecker
+	errs        chan error
 
-type GlobalUserOptions struct {
-	envUsername    string
-	lastRemote     string
+	client         *client.Client
 	noMoreSessions bool
 }
 
 func NewServer(conf Config, log *zap.SugaredLogger) *Server {
-	acl := NewACLValidator(conf.ACL)
-	return &Server{Conf: conf, SugaredLogger: log, acl: acl}
-}
-
-func (s *Server) readHostKey() (sign ssh.Signer, err error) {
-	privateBytes, err := ioutil.ReadFile(s.Conf.HostKey)
-	if err != nil {
-		return
+	return &Server{
+		Conf:          conf,
+		SugaredLogger: log,
+		acl:           NewACLValidator(conf.ACL),
 	}
-	return ssh.ParsePrivateKey(privateBytes)
-}
-
-func readAuthorizedKeys(fname string) (map[string]bool, error) {
-	data, err := ioutil.ReadFile(fname)
-	if err != nil {
-		return nil, err
-	}
-
-	ak := map[string]bool{}
-	for len(data) > 0 {
-		pubKey, _, _, rest, err := ssh.ParseAuthorizedKey(data)
-		if err != nil {
-			return nil, err
-		}
-
-		ak[string(pubKey.Marshal())] = true
-		data = rest
-	}
-
-	return ak, nil
 }
 
 func (s *Server) authCallback(sc ssh.ConnMetadata, pubKey ssh.PublicKey) (*ssh.Permissions, error) {
+	username := sc.User()
+	username = strings.Split(username, "/")[0]
+	meta := customSSHConnMetadata{
+		ConnMetadata: sc,
+		customUser:   username,
+	}
 	keyFp := ssh.FingerprintSHA256(pubKey)
 
 	clientCert, ok := pubKey.(*ssh.Certificate)
 	if s.certChecker != nil && ok {
+		// client offered signed certificate and we have certChecker
 		certFp := ssh.FingerprintSHA256(clientCert.SignatureKey)
-		perms, err := s.certChecker.Authenticate(sc, pubKey)
+		perms, err := s.certChecker.Authenticate(meta, pubKey)
 		if err != nil {
 			s.Infow("client offered invalid certificate",
 				"err", err,
-				"user", sc.User(),
+				"user", username,
 				"pubkey-fp", keyFp,
 				"ca-fp", certFp,
 				"sessid", sc.SessionID(),
@@ -86,7 +67,7 @@ func (s *Server) authCallback(sc ssh.ConnMetadata, pubKey ssh.PublicKey) (*ssh.P
 			return nil, err
 		}
 		s.Infow("client offered valid certificate",
-			"user", sc.User(),
+			"user", username,
 			"pubkey-fp", keyFp,
 			"ca-fp", certFp,
 			"sessid", sc.SessionID(),
@@ -94,7 +75,7 @@ func (s *Server) authCallback(sc ssh.ConnMetadata, pubKey ssh.PublicKey) (*ssh.P
 		return perms, nil
 	}
 
-	usr, err := user.Lookup(sc.User())
+	usr, err := user.Lookup(username)
 	if err != nil {
 		return nil, errors.Wrap(err, "cannot lookup user")
 	}
@@ -108,52 +89,44 @@ func (s *Server) authCallback(sc ssh.ConnMetadata, pubKey ssh.PublicKey) (*ssh.P
 
 	if ak[string(pubKey.Marshal())] {
 		s.Infow("client offered valid key",
-			"user", sc.User(),
+			"user", username,
 			"pubkey-fp", keyFp,
 			"sessid", sc.SessionID(),
 		)
 		return &ssh.Permissions{}, nil
 	}
 	s.Infow("client offered invalid key",
-		"user", sc.User(),
+		"user", username,
 		"pubkey-fp", keyFp,
 		"sessid", sc.SessionID(),
 	)
 	return nil, fmt.Errorf("unknown public key for %q", sc.User())
 }
 
-func (s *Server) handleClient(chans <-chan ssh.NewChannel, reqs <-chan *ssh.Request, errs chan<- error) {
+func (s *Server) processClient(sshChans <-chan ssh.NewChannel, reqs <-chan *ssh.Request) {
 	for {
-		if chans == nil && reqs == nil {
+		if sshChans == nil && reqs == nil {
 			break
 		}
 
 		select {
-		case ch, ok := <-chans:
+		case ch, ok := <-sshChans:
 			if !ok {
-				chans = nil
+				sshChans = nil
 				continue
 			}
 			s.Debugw("new channel request", "type", ch.ChannelType())
 			switch ch.ChannelType() {
 			case "session":
 				if s.noMoreSessions {
-					errs <- ch.Reject(ssh.Prohibited, "no-more-sessions was sent")
+					s.errs <- ch.Reject(ssh.Prohibited, "no-more-sessions was sent")
 					continue
 				}
 				s.Infow("session request")
 
-				go HandleSession(ch, &sessionConfig{
-					channelConfig: channelConfig{
-						SugaredLogger: s.SugaredLogger,
-						conf:          s.Conf,
-						errs:          errs,
-						agent:         s.agent,
-						username:      s.username,
-						sessId:        s.sessId,
-						clientProv:    s.clientProvider,
-					},
-					acl: s.acl,
+				go HandleSession(&sessionConfig{
+					newCh: ch,
+					serv:  s,
 				})
 
 			case "direct-tcpip", "direct-streamlocal@openssh.com":
@@ -161,41 +134,42 @@ func (s *Server) handleClient(chans <-chan ssh.NewChannel, reqs <-chan *ssh.Requ
 				if ch.ChannelType() == "direct-streamlocal@openssh.com" {
 					var udsForwardReq ssh_types.ChannelOpenDirectUDSMsg
 					if err := ssh.Unmarshal(ch.ExtraData(), &udsForwardReq); err != nil {
-						errs <- errors.Wrap(err, "error parsing uds request")
+						s.errs <- errors.Wrap(err, "error parsing uds request")
 						continue
 					}
-					if strings.Index(udsForwardReq.RAddr, "/tmp/.fwd/localhost/") == 0 {
+					oldBastionPrefix := "/tmp/.fwd/localhost/"
+					if strings.Index(udsForwardReq.RAddr, oldBastionPrefix) == 0 {
 						tcpForwardReq.LAddr = udsForwardReq.LAddr
 						tcpForwardReq.LPort = udsForwardReq.LPort
+						tcpForwardReq.RAddr = "127.0.0.1"
+						port, err := strconv.Atoi(udsForwardReq.RAddr[len(oldBastionPrefix):])
+						if err != nil {
+							s.errs <- ch.Reject(ssh.Prohibited, "invalid port in forward request")
+							continue
+						}
+						tcpForwardReq.RPort = uint32(port)
 					} else {
-						errs <- ch.Reject(ssh.Prohibited, fmt.Sprintf("UDS not yet supported"))
+						s.errs <- ch.Reject(ssh.Prohibited, "UDS not yet supported")
 						continue
 					}
 				} else {
 					if err := ssh.Unmarshal(ch.ExtraData(), &tcpForwardReq); err != nil {
-						errs <- errors.Wrap(err, "error parsing tcpip request")
+						s.errs <- errors.Wrap(err, "error parsing tcpip request")
 						continue
 					}
 				}
 
 				s.Infow("tcpip request", "req", tcpForwardReq)
 
-				if !s.acl.CheckForward(s.username, tcpForwardReq.RAddr, uint16(tcpForwardReq.RPort)) {
+				if !s.acl.CheckForward(s.remoteUser, tcpForwardReq.RAddr, uint16(tcpForwardReq.RPort)) {
 					s.Warnw("access denied")
-					errs <- ch.Reject(ssh.Prohibited, "access denied")
+					s.errs <- ch.Reject(ssh.Prohibited, "access denied")
 					continue
 				}
 
-				go HandleTCP(ch, &tcpConfig{
-					channelConfig: channelConfig{
-						SugaredLogger: s.SugaredLogger,
-						conf:          s.Conf,
-						errs:          errs,
-						agent:         s.agent,
-						username:      s.username,
-						sessId:        s.sessId,
-						clientProv:    s.clientProvider,
-					},
+				go HandleTCP(&tcpConfig{
+					newCh:   ch,
+					serv:    s,
 					srcHost: tcpForwardReq.LAddr,
 					srcPort: uint16(tcpForwardReq.LPort),
 					dstHost: tcpForwardReq.RAddr,
@@ -203,9 +177,9 @@ func (s *Server) handleClient(chans <-chan ssh.NewChannel, reqs <-chan *ssh.Requ
 				})
 
 			case "x11", "forwarded-tcpip", "tun@openssh.com", "forwarded-streamlocal@openssh.com":
-				errs <- ch.Reject(ssh.Prohibited, fmt.Sprintf("using %s is prohibited", ch.ChannelType()))
+				s.errs <- ch.Reject(ssh.Prohibited, fmt.Sprintf("using %s is prohibited", ch.ChannelType()))
 			default:
-				errs <- ch.Reject(ssh.UnknownChannelType, "unknown channel type")
+				s.errs <- ch.Reject(ssh.UnknownChannelType, "unknown channel type")
 			}
 
 		case req, ok := <-reqs:
@@ -216,23 +190,23 @@ func (s *Server) handleClient(chans <-chan ssh.NewChannel, reqs <-chan *ssh.Requ
 			s.Debugw("global request", "req", req)
 			switch req.Type {
 			case "keepalive@openssh.com":
-				errs <- req.Reply(true, nil)
+				s.errs <- req.Reply(true, nil)
 			case "no-more-sessions@openssh.com":
 				s.noMoreSessions = true
 			default:
 				// "[cancel-]tcpip-forward" falls here
 				if req.WantReply {
-					errs <- req.Reply(false, nil)
+					s.errs <- req.Reply(false, nil)
 				}
 			}
 		}
 	}
 
-	close(errs)
+	close(s.errs)
 }
 
 func (s *Server) ProcessConnection(nConn net.Conn) (err error) {
-	hostKey, err := s.readHostKey()
+	hostKey, err := readHostKey(s.Conf.HostKey)
 	if err != nil {
 		return errors.Wrap(err, "failed to read host key")
 	}
@@ -268,25 +242,42 @@ func (s *Server) ProcessConnection(nConn net.Conn) (err error) {
 	s.SugaredLogger = s.SugaredLogger.With(
 		"sessid", conn.SessionID()[:6], // save some space in logs
 	)
-	s.username = conn.User()
+	parts := strings.Split(conn.User(), "/")
+	if len(parts) > 3 {
+		return errors.New("invalid username provided, can be 'username[/remoteHost[/remotePort]]'")
+	}
+
+	s.remoteUser = parts[0]
+	if len(parts) > 1 {
+		s.remoteHost = parts[1]
+	}
+	if len(parts) > 2 {
+		port, err := strconv.Atoi(parts[2])
+		if err != nil {
+			return fmt.Errorf("invalid remote port: %v", parts[2])
+		}
+		s.remotePort = uint16(port)
+	} else {
+		s.remotePort = 22
+	}
+
 	s.sessId = conn.SessionID()
 	s.sshConn = conn
 	s.Infow("authentication succeded", "user", conn.User())
 
 	s.agent = &ClientAgent{
+		Mutex:         &sync.Mutex{},
 		SugaredLogger: s.SugaredLogger,
 		sshConn:       conn,
 	}
-	s.clientProvider = client.NewProvider()
 
-	errs := make(chan error)
-	go s.handleClient(chans, globalReqs, errs)
+	s.errs = make(chan error)
+	go s.processClient(chans, globalReqs)
 
-	for err := range errs {
+	for err := range s.errs {
 		if err != nil {
 			if _, ok := err.(CriticalError); ok {
-				s.Errorw("critical error in channel", "err", err)
-				return err
+				return errors.Wrap(err, "critical error in channel")
 			}
 			// TODO: write to client?
 			s.Warnw("non-critical error in channel", "err", err)
