@@ -161,6 +161,27 @@ func (s *Server) processClient(sshChans <-chan ssh.NewChannel, reqs <-chan *ssh.
 
 				s.Infow("tcpip request", "req", tcpForwardReq)
 
+				if s.client == nil && tcpForwardReq.LPort == 65535 && tcpForwardReq.LAddr == "127.0.0.1" {
+					s.Info("OpenSSH connects with -J")
+					innerServer := NewServer(s.Conf, s.SugaredLogger)
+					innerServer.remoteHost = tcpForwardReq.RAddr
+					innerServer.remotePort = uint16(tcpForwardReq.RPort)
+
+					channel, reqs, err := ch.Accept()
+					if err != nil {
+						s.errs <- errors.Wrap(err, "failed to accept channel")
+						return
+					}
+					s.Info("accepted stdio forward channel")
+
+					// no requests here
+					go ssh.DiscardRequests(reqs)
+					if err = innerServer.ProcessConnection(fakeNetConn{channel}); err != nil {
+						s.errs <- NewCritical(errors.Wrap(err, "failed process inner conn"))
+					}
+					return
+				}
+
 				if !s.acl.CheckForward(s.remoteUser, tcpForwardReq.RAddr, uint16(tcpForwardReq.RPort)) {
 					s.Warnw("access denied")
 					s.errs <- ch.Reject(ssh.Prohibited, "access denied")
@@ -257,7 +278,7 @@ func (s *Server) ProcessConnection(nConn net.Conn) (err error) {
 			return fmt.Errorf("invalid remote port: %v", parts[2])
 		}
 		s.remotePort = uint16(port)
-	} else {
+	} else if s.remotePort == 0 {
 		s.remotePort = 22
 	}
 

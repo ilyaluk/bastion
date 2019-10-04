@@ -1,6 +1,7 @@
 package bastion
 
 import (
+	"io"
 	"io/ioutil"
 	"net"
 	"os"
@@ -72,20 +73,34 @@ func (s stdioNetConn) LocalAddr() net.Addr {
 }
 
 func (s stdioNetConn) RemoteAddr() net.Addr {
+	// TODO
 	return nilTCPAddr("stdout")
 }
 
-func (s stdioNetConn) SetDeadline(t time.Time) error {
-	return nil
+func (s stdioNetConn) SetDeadline(t time.Time) error { return nil }
+
+func (s stdioNetConn) SetReadDeadline(t time.Time) error { return nil }
+
+func (s stdioNetConn) SetWriteDeadline(t time.Time) error { return nil }
+
+type fakeNetConn struct {
+	io.ReadWriteCloser
 }
 
-func (s stdioNetConn) SetReadDeadline(t time.Time) error {
-	return nil
+func (f fakeNetConn) LocalAddr() net.Addr {
+	return nilTCPAddr("")
 }
 
-func (s stdioNetConn) SetWriteDeadline(t time.Time) error {
-	return nil
+func (f fakeNetConn) RemoteAddr() net.Addr {
+	// TODO
+	return nilTCPAddr("")
 }
+
+func (f fakeNetConn) SetDeadline(t time.Time) error { return nil }
+
+func (f fakeNetConn) SetReadDeadline(t time.Time) error { return nil }
+
+func (f fakeNetConn) SetWriteDeadline(t time.Time) error { return nil }
 
 type channelWriteCloser struct {
 	c ssh.Channel
