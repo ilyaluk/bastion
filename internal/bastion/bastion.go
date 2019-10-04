@@ -73,11 +73,6 @@ func Run() (err error) {
 		log.Fatalf("usage: %s config.yaml", os.Args[0])
 	}
 
-	inetdStyle := false
-	if len(os.Args) >= 3 && os.Args[2] == "-i" {
-		inetdStyle = true
-	}
-
 	conf, err := ReadConfig(os.Args[1])
 	if err != nil {
 		return
@@ -85,7 +80,7 @@ func Run() (err error) {
 	log.Infow("loaded config", "conf", conf)
 
 	var clientConn net.Conn
-	if inetdStyle {
+	if conf.InetDStyle {
 		clientConn = stdioNetConn{}
 	} else {
 		clientConn, err = net.FileConn(os.NewFile(3, "nConn"))

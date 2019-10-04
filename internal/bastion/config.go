@@ -21,6 +21,7 @@ type ACLConfig struct {
 
 //noinspection GoStructTag
 type Config struct {
+	InetDStyle        bool          `yaml:"inetd_style"`
 	HostKey           string        `yaml:"host_key"`
 	ConnectTimeoutSec uint          `yaml:"connect_timeout"`
 	ConnectTimeout    time.Duration `yaml:"-"`
